@@ -25,6 +25,8 @@ extern void window_load_dir(Window *win, unsigned int page);
 
 // Forward declarations from device.c
 extern unsigned int device_read_dir(Device *dev, FileEntry *files, unsigned int max_files, unsigned int page);
+extern void cart_launch_rom(unsigned int entry_addr);
+extern void cart_launch_grom(unsigned int entry_addr, unsigned int port);
 
 // Forward declaration for local function
 static void input_update_focus_status(void);
@@ -168,9 +170,22 @@ static void input_open(void) {
     // If a window is focused, Enter acts on selected file
     if (g_app.focus != FOCUS_DESKTOP) {
         win = window_get_focused();
-        if (win && win->file_count > 0) {
-            ui_status("File selected");
-            // TODO: Implement file action
+        if (win && win->file_count > 0 && win->cursor_y < win->file_count) {
+            FileEntry *file = &win->files[win->cursor_y];
+
+            if (file->type == FILE_TYPE_ROM) {
+                // Launch ROM program - branch to entry address
+                // This does not return
+                cart_launch_rom(file->size);
+            } else if (file->type == FILE_TYPE_GROM) {
+                // Launch GROM program via GPL interpreter
+                // entry_addr in size, port in rec_len
+                // This does not return
+                cart_launch_grom(file->size, file->rec_len);
+            } else {
+                // Disk file - TODO
+                ui_status("File selected");
+            }
         }
         return;
     }

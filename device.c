@@ -2,10 +2,14 @@
 #include "config.h"
 #include "types.h"
 #include "grom.h"
+#include "vdp.h"
 
 // Forward declarations
 extern void ui_status(const char *msg);
 extern void ui_draw_desktop(void);
+
+// External character set loader from libti99
+extern void charsetlc(void);
 
 // CRU base addresses to scan for disk controllers
 // Standard TI floppy: >1100
@@ -412,4 +416,82 @@ unsigned int device_open(Device *dev) {
 
     (void)dev;
     return 0;
+}
+
+// Set up Editor/Assembler environment before launching a program
+// This is the safest environment for most programs
+static void cart_setup_ea_environment(void) {
+    // Set VDP registers 0-7 to E/A defaults
+    // R0=00, R1=E0, R2=00, R3=0E, R4=01, R5=06, R6=00, R7=F3
+    VDP_SET_REGISTER(VDP_REG_MODE1, 0x80);   // 16K, display off, int disabled
+    VDP_SET_REGISTER(VDP_REG_MODE0, 0x00);   // No external video
+    VDP_SET_REGISTER(VDP_REG_SIT,   0x00);   // Screen image table at >0000
+    VDP_SET_REGISTER(VDP_REG_CT,    0x0E);   // Color table at >0380
+    VDP_SET_REGISTER(VDP_REG_PDT,   0x01);   // Pattern table at >0800
+    VDP_SET_REGISTER(VDP_REG_SAL,   0x06);   // Sprite attr table at >0300
+    VDP_SET_REGISTER(VDP_REG_SDT,   0x00);   // Sprite pattern table at >0000
+    VDP_SET_REGISTER(VDP_REG_COL,   0xF3);   // White on light green
+
+    // Clear screen (768 bytes of spaces at >0000)
+    vdpmemset(0x0000, 0x20, 768);
+
+    // Set all colors to black on transparent (32 bytes at >0380)
+    vdpmemset(0x0380, 0x10, 32);
+
+    // turn off sprites
+    vdpchar(0x300, 0xd0);
+
+    // Set pattern table pointer for character loader
+    gPattern = 0x0800;
+
+    // Load standard lowercase character set
+    charsetlc();
+
+    VDP_SET_REGISTER(VDP_REG_MODE1, 0xE0);   // 16K, display on, int enabled
+}
+
+// Launch a ROM cartridge program
+// entry_addr: CPU address to branch to (from program list)
+// This function does not return
+void cart_launch_rom(unsigned int entry_addr) {
+    // Set up E/A environment first
+    cart_setup_ea_environment();
+
+    // Branch to the entry point
+    // The ROM program takes over from here
+    __asm__ volatile (
+        "mov %0, r0\n\t"
+        "b *r0"
+        :
+        : "r" (entry_addr)
+        : "r0"
+    );
+    // Never reached
+    for (;;);
+}
+
+// Launch a GROM cartridge program via GPL interpreter
+// entry_addr: GROM address to start at (from program list)
+// port: GROM port (0-15)
+// This function does not return
+void cart_launch_grom(unsigned int entry_addr, unsigned int port) {
+    volatile unsigned int *grom_base = (volatile unsigned int *)0x83FA;
+    volatile unsigned int *gpl_start = (volatile unsigned int *)0x83EC;
+
+    // Set up E/A environment first
+    cart_setup_ea_environment();
+
+    // Set GROM base address: (port * 4) + 0x9800
+    *grom_base = (port << 2) + 0x9800;
+
+    // Set GPL start address
+    *gpl_start = entry_addr;
+
+    // Switch to GPL workspace and branch to interpreter
+    __asm__ volatile (
+        "lwpi >83E0\n\t"
+        "b @>0060"
+    );
+    // Never reached
+    for (;;);
 }
