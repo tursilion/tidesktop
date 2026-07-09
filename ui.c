@@ -156,12 +156,61 @@ static void ui_draw_device_icon(unsigned int idx, Device *dev) {
     }
 }
 
+// Check if a column is covered by any active window
+static unsigned int ui_col_covered(unsigned int col) {
+    unsigned int i;
+    Window *win;
+
+    for (i = 0; i < MAX_WINDOWS; i++) {
+        win = &g_app.windows[i];
+        if (win->active) {
+            if (col >= win->x && col < win->x + win->w) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 // Draw the desktop background and icons
+// Avoids drawing over active windows
 void ui_draw_desktop(void) {
     unsigned int i;
+    unsigned int row, col;
+    unsigned int start_col, run_len;
 
-    // Clear screen with spaces
-    vdpmemset(gImage, ' ', SCREEN_WIDTH * SCREEN_HEIGHT);
+    // Clear title bar area (row 0) - always visible
+    ui_hline(0, 0, SCREEN_WIDTH, ' ');
+
+    // Clear divider row 1 - always visible
+    ui_hline(1, 0, SCREEN_WIDTH, ' ');
+
+    // Clear content area (rows 2-21), avoiding windows
+    // Find runs of uncovered columns to clear efficiently
+    for (row = 2; row < SCREEN_HEIGHT - 2; row++) {
+        col = 0;
+        while (col < SCREEN_WIDTH) {
+            // Skip covered columns
+            while (col < SCREEN_WIDTH && ui_col_covered(col)) {
+                col++;
+            }
+            if (col >= SCREEN_WIDTH) break;
+
+            // Find run of uncovered columns
+            start_col = col;
+            while (col < SCREEN_WIDTH && !ui_col_covered(col)) {
+                col++;
+            }
+            run_len = col - start_col;
+
+            // Clear this run
+            ui_hline(row, start_col, run_len, ' ');
+        }
+    }
+
+    // Clear status area (rows 22-23) - always visible
+    ui_hline(SCREEN_HEIGHT - 2, 0, SCREEN_WIDTH, ' ');
+    ui_hline(SCREEN_HEIGHT - 1, 0, SCREEN_WIDTH, ' ');
 
     // Draw futuristic title bar at top (uses global title string)
     ui_draw_title_bar(g_title_string);
@@ -175,8 +224,14 @@ void ui_draw_desktop(void) {
     // Draw status/help text (row 23)
     ui_putstr(SCREEN_HEIGHT - 1, 1, "1-9:Dev  S:Scan  M:Menu", 23);
 
-    // Draw device icons
+    // Draw device icons - skip icons obscured by windows
+    // Icon positions: col 2 + (idx % 4) * 7 = cols 2, 9, 16, 23
     for (i = 0; i < g_app.device_count; i++) {
+        unsigned int icon_col = 2 + (i % 4) * 7;
+
+        // Skip if icon would be covered by a window
+        if (ui_col_covered(icon_col)) continue;
+
         ui_draw_device_icon(i, &g_app.devices[i]);
     }
 

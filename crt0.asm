@@ -19,29 +19,20 @@ _start:
 # The registers will be located at the start of scratchpad memory 
   lwpi >8300
 
-# It appears I have some work to do on elf2ea5 - in particular,
-# it no longer populates the init_data section, relying instead on
-# a separate loader file that contains all the init_data. And that's
-# reasonable - it saves memory - but I need to add an option to yes 
-# include the init_data, and offer two EA5 crt0s (one that reads it
-# and one that doesn't.) I had considered a flag, but since the goal
-# of doing that was to save every byte I could, no need to waste the
-# space. We still need init_data for the BSS zero.
-
 # we are not using init_data here - we are using a separate LOAD file
 # Initialize data segment to known values
-#  li   r0, _init_data  # Point to data initialization structure
-#  mov  *r0+, r1        # R1 = Start of data section
-#  mov  *r0+, r2        # R2 = Location of initial data
-#  mov  *r0+, r3        # R3 = Size of data section
-#  jeq  data_copy_end   # If size is 0, skip the loop
+  li   r0, _init_data  # Point to data initialization structure
+  mov  *r0+, r1        # R1 = Start of data section
+  mov  *r0+, r2        # R2 = Location of initial data
+  mov  *r0+, r3        # R3 = Size of data section
+  jeq  data_copy_end   # If size is 0, skip the loop
   
   # Copy loop for data initialization
-#data_copy_top:
-#  mov  *r2+, *r1+      
-#  dect r3
-#  jgt  data_copy_top
-#data_copy_end:
+data_copy_top:
+  mov  *r2+, *r1+      
+  dect r3
+  jgt  data_copy_top
+data_copy_end:
 
 # Initialize BSS segment to zeroes
   mov  *r0+, r1        # R1 = Start of BSS section

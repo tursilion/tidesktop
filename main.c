@@ -9,6 +9,7 @@ extern void ui_init(void);
 extern void ui_draw_desktop(void);
 extern void input_process(void);
 extern void chars_init(void);
+extern void window_init(void);
 
 // Global application state
 AppState g_app;
@@ -71,11 +72,7 @@ static void app_init(void) {
         g_app.devices[i].flags = DEVICE_NONE;
     }
 
-    // Clear windows
-    for (i = 0; i < MAX_WINDOWS; i++) {
-        g_app.windows[i].device = 0;
-        g_app.windows[i].count = 0;
-    }
+    // Windows are initialized by window_init()
 
     // Add cartridge as first device (always present)
     g_app.devices[0].cru_base = 0;
@@ -92,6 +89,9 @@ int main(void) {
 
     // Initialize application state
     app_init();
+
+    // Initialize window system
+    window_init();
 
     // Initialize UI
     ui_init();

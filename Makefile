@@ -22,7 +22,7 @@ NAME=desktop
 # -std=c99: use C99 standard
 # -fno-builtin: don't use built-in functions
 # -fno-function-cse: prevents gcc from preferring registers for bl calls
-CFLAGS=-Os -std=c99 -c -s --save-temp -DTI99 -fno-builtin -fno-function-cse
+CFLAGS=-Os -std=c99 -c -s --save-temp -DTI99 -fno-builtin -fno-function-cse -fverbose-asm
 
 # Include paths
 INCPATH=-I$(LIBTI99)
@@ -37,7 +37,7 @@ LDFLAGS=-M -Ttext=0xA000 -Tdata=0x2000
 .PHONY: all clean install
 
 # Object files - crt0 must be first!
-OBJECTS = crt0.o main.o chars.o ui.o input.o device.o
+OBJECTS = crt0.o main.o chars.o ui.o input.o device.o window.o
 
 all: $(NAME)
 
@@ -50,7 +50,7 @@ clean:
 
 install: $(NAME)
 	$(CP) DESKTOP* $(CLASSIC99_DSK1)
-	$(CLASSIC99_PASTE) -reset 5525DSK0.DESKTOP1\\n
+	$(CLASSIC99_PASTE) -reset QQ25DSK0.DESKTOP1\\n
 
 # Local crt0 for EA5 startup (copied from libti99)
 crt0.o: crt0.asm

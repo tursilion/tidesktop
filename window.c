@@ -1,0 +1,636 @@
+// window.c - TI-99/4A Desktop Environment Window Management
+#include "vdp.h"
+#include "config.h"
+#include "types.h"
+
+// External UI functions
+extern void ui_status(const char *msg);
+
+// Global default scroll position (remembered across windows)
+static unsigned int g_default_scroll_x = FILE_COL_NAME;
+
+// Type prefix strings (2 chars each) - used with record length
+// PROG, GROM, ROM have no record length, others are XX + nnn format
+static const char *type_prefix[] = {
+    "PROG",   // FILE_TYPE_PROGRAM (special case - no rec len)
+    "IF",     // FILE_TYPE_INTFIX
+    "IV",     // FILE_TYPE_INTVAR
+    "DF",     // FILE_TYPE_DISFIX
+    "DV",     // FILE_TYPE_DISVAR
+    "GROM",   // FILE_TYPE_GROM (special case - no rec len)
+    "ROM "    // FILE_TYPE_ROM (special case - no rec len)
+};
+
+// Initialize window system
+void window_init(void) {
+    unsigned int i;
+
+    g_app.win_count = 0;
+    g_app.focus = FOCUS_DESKTOP;
+    g_default_scroll_x = FILE_COL_NAME;  // Start at filename column
+
+    for (i = 0; i < MAX_WINDOWS; i++) {
+        g_app.windows[i].active = 0;
+        g_app.windows[i].device = 0;
+        g_app.windows[i].file_count = 0;
+        g_app.windows[i].scroll_x = FILE_COL_NAME;
+        g_app.windows[i].scroll_y = 0;
+        g_app.windows[i].cursor_y = 0;
+        g_app.windows[i].page_start = 0;
+    }
+
+    // Set window positions
+    // Window 0 = right half
+    g_app.windows[0].x = WIN1_X;
+    g_app.windows[0].y = WIN1_Y;
+    g_app.windows[0].w = WIN_WIDTH;
+    g_app.windows[0].h = WIN_HEIGHT;
+
+    // Window 1 = left half
+    g_app.windows[1].x = WIN2_X;
+    g_app.windows[1].y = WIN2_Y;
+    g_app.windows[1].w = WIN_WIDTH;
+    g_app.windows[1].h = WIN_HEIGHT;
+}
+
+// Draw window border and title
+static void window_draw_frame(Window *win, const char *title) {
+    unsigned int x, y, w, h;
+    unsigned int i;
+    unsigned int addr;
+
+    x = win->x;
+    y = win->y;
+    w = win->w;
+    h = win->h;
+
+    // Top border with corners
+    vdpscreenchar(VDP_SCREEN_POS(y, x), CHAR_WIN_TL);
+    hchar(y, x + 1, CHAR_WIN_H, w - 2);
+    vdpscreenchar(VDP_SCREEN_POS(y, x + w - 1), CHAR_WIN_TR);
+
+    // Side borders
+    for (i = 1; i < h - 1; i++) {
+        vdpscreenchar(VDP_SCREEN_POS(y + i, x), CHAR_WIN_V);
+        vdpscreenchar(VDP_SCREEN_POS(y + i, x + w - 1), CHAR_WIN_V);
+    }
+
+    // Bottom border with corners
+    vdpscreenchar(VDP_SCREEN_POS(y + h - 1, x), CHAR_WIN_BL);
+    hchar(y + h - 1, x + 1, CHAR_WIN_H, w - 2);
+    vdpscreenchar(VDP_SCREEN_POS(y + h - 1, x + w - 1), CHAR_WIN_BR);
+
+    // Clear interior
+    for (i = 1; i < h - 1; i++) {
+        hchar(y + i, x + 1, ' ', w - 2);
+    }
+
+    // Draw title (truncate to fit)
+    if (title) {
+        unsigned int title_len = 0;
+        while (title[title_len] && title_len < w - 4) title_len++;
+
+        addr = gImage + VDP_SCREEN_POS(y, x + 2);
+        VDP_SET_ADDRESS_WRITE(addr);
+        for (i = 0; i < title_len; i++) {
+            VDPWD(title[i]);
+        }
+    }
+}
+
+// Format a 16-bit address as 4 hex digits
+// Writes 4 chars to buf
+static void format_hex(unsigned int addr, char *buf) {
+    static const char hex[] = "0123456789ABCDEF";
+    buf[0] = hex[(addr >> 12) & 0xF];
+    buf[1] = hex[(addr >> 8) & 0xF];
+    buf[2] = hex[(addr >> 4) & 0xF];
+    buf[3] = hex[addr & 0xF];
+}
+
+// Format a file size with suffix (K, M, or raw if <1000)
+// Writes 4 chars to buf
+static void format_size(unsigned int size, char *buf) {
+    if (size >= 1000) {
+        // Show as K (sectors are ~256 bytes, so K is reasonable)
+        unsigned int k = size / 4;  // Approximate KB
+        if (k >= 1000) {
+            // Show as M
+            buf[0] = '0' + (k / 1000) % 10;
+            buf[1] = '0' + (k / 100) % 10;
+            buf[2] = '0' + (k / 10) % 10;
+            buf[3] = 'M';
+        } else if (k >= 100) {
+            buf[0] = '0' + (k / 100) % 10;
+            buf[1] = '0' + (k / 10) % 10;
+            buf[2] = '0' + k % 10;
+            buf[3] = 'K';
+        } else if (k >= 10) {
+            buf[0] = ' ';
+            buf[1] = '0' + (k / 10) % 10;
+            buf[2] = '0' + k % 10;
+            buf[3] = 'K';
+        } else {
+            buf[0] = ' ';
+            buf[1] = ' ';
+            buf[2] = '0' + k % 10;
+            buf[3] = 'K';
+        }
+    } else if (size >= 100) {
+        buf[0] = '0' + (size / 100) % 10;
+        buf[1] = '0' + (size / 10) % 10;
+        buf[2] = '0' + size % 10;
+        buf[3] = ' ';
+    } else if (size >= 10) {
+        buf[0] = ' ';
+        buf[1] = '0' + (size / 10) % 10;
+        buf[2] = '0' + size % 10;
+        buf[3] = ' ';
+    } else {
+        buf[0] = ' ';
+        buf[1] = ' ';
+        buf[2] = '0' + size % 10;
+        buf[3] = ' ';
+    }
+}
+
+// Build a formatted line for a file entry
+// Format: "999K PROG  FILENAME..." or "6025 GROM  FILENAME..." (FILE_LINE_LEN chars)
+static void format_file_line(FileEntry *file, char *line) {
+    unsigned int i;
+    const char *prefix;
+    unsigned int rec_len;
+
+    // Size/Address (4 chars) - hex for GROM/ROM, size for disk files
+    if (file->type == FILE_TYPE_GROM || file->type == FILE_TYPE_ROM) {
+        format_hex(file->size, line);  // Entry point address in hex
+    } else {
+        format_size(file->size, line);
+    }
+
+    // Space
+    line[4] = ' ';
+
+    // Type (5 chars): "PROG ", "GROM ", "ROM  " or "XXnnn" where XX is type prefix and nnn is rec_len
+    prefix = (file->type <= FILE_TYPE_ROM) ? type_prefix[file->type] : "??";
+
+    if (file->type == FILE_TYPE_PROGRAM) {
+        // Program files: "PROG "
+        line[5] = 'P';
+        line[6] = 'R';
+        line[7] = 'O';
+        line[8] = 'G';
+        line[9] = ' ';
+    } else if (file->type == FILE_TYPE_GROM) {
+        // GROM cartridge: "GROM "
+        line[5] = 'G';
+        line[6] = 'R';
+        line[7] = 'O';
+        line[8] = 'M';
+        line[9] = ' ';
+    } else if (file->type == FILE_TYPE_ROM) {
+        // ROM cartridge: "ROM  "
+        line[5] = 'R';
+        line[6] = 'O';
+        line[7] = 'M';
+        line[8] = ' ';
+        line[9] = ' ';
+    } else {
+        // Data files: 2-char prefix + 3-digit record length
+        line[5] = prefix[0];
+        line[6] = prefix[1];
+        rec_len = file->rec_len;
+        if (rec_len >= 100) {
+            line[7] = '0' + (rec_len / 100) % 10;
+            line[8] = '0' + (rec_len / 10) % 10;
+            line[9] = '0' + rec_len % 10;
+        } else if (rec_len >= 10) {
+            line[7] = ' ';
+            line[8] = '0' + (rec_len / 10) % 10;
+            line[9] = '0' + rec_len % 10;
+        } else {
+            line[7] = ' ';
+            line[8] = ' ';
+            line[9] = '0' + rec_len % 10;
+        }
+    }
+
+    // Space
+    line[10] = ' ';
+
+    // Filename (up to 32 chars, pad with spaces) - starts at position 11
+    for (i = 0; i < FILE_NAME_LEN; i++) {
+        if (file->name[i]) {
+            line[11 + i] = file->name[i];
+        } else {
+            // Pad rest with spaces
+            while (i < FILE_NAME_LEN) {
+                line[11 + i] = ' ';
+                i++;
+            }
+            break;
+        }
+    }
+
+    // Null terminate (though we use fixed length)
+    line[FILE_LINE_LEN] = 0;
+}
+
+// Draw window content (file list)
+static void window_draw_content(Window *win) {
+    unsigned int i, row;
+    unsigned int x, y;
+    unsigned int visible_rows;
+    unsigned int addr;
+    FileEntry *file;
+    char line[FILE_LINE_LEN + 1];
+
+    x = win->x + 1;  // Inside left border
+    y = win->y + 1;  // Below title bar
+    visible_rows = win->h - 2;  // Minus top and bottom borders
+
+    for (i = 0; i < visible_rows && i < win->file_count; i++) {
+        row = y + i;
+        file = &win->files[i];
+
+        // Build formatted line
+        format_file_line(file, line);
+
+        // Clear the row first
+        hchar(row, x, ' ', win->w - 2);
+
+        // Draw selection indicator if this is selected row
+        if (i == win->cursor_y) {
+            vdpscreenchar(VDP_SCREEN_POS(row, x), '>');
+        }
+
+        // Draw file info (start at column 2 for selector space)
+        addr = gImage + VDP_SCREEN_POS(row, x + 1);
+        VDP_SET_ADDRESS_WRITE(addr);
+
+        // Output visible portion based on scroll_x
+        {
+            unsigned int j;
+            unsigned int start = win->scroll_x;
+            unsigned int max_chars = win->w - 4;  // Leave room for selector and borders
+
+            for (j = 0; j < max_chars; j++) {
+                unsigned int idx = start + j;
+                if (idx < FILE_LINE_LEN) {
+                    VDPWD(line[idx]);
+                } else {
+                    VDPWD(' ');
+                }
+            }
+        }
+    }
+
+    // Clear remaining rows if fewer files than visible rows
+    for (; i < visible_rows; i++) {
+        hchar(y + i, x, ' ', win->w - 2);
+    }
+}
+
+// Set window to expanded (single window) position
+static void window_set_expanded(Window *win) {
+    win->x = WIN_EXPANDED_X;
+    win->w = WIN_EXPANDED_W;
+}
+
+// Set window to half-screen position
+static void window_set_half(unsigned int win_idx) {
+    Window *win = &g_app.windows[win_idx];
+    if (win_idx == 0) {
+        win->x = WIN1_X;  // Right half
+    } else {
+        win->x = WIN2_X;  // Left half
+    }
+    win->w = WIN_WIDTH;
+}
+
+// Open a window for a device
+// Returns window index (0 or 1) or -1 if failed
+int window_open(Device *dev) {
+    Window *win;
+    unsigned int win_idx;
+    char title[12];
+
+    // Find first available window slot
+    // First window goes to right (index 0), second to left (index 1)
+    if (!g_app.windows[0].active) {
+        win_idx = 0;
+    } else if (!g_app.windows[1].active) {
+        win_idx = 1;
+    } else {
+        // Both windows full
+        ui_status("No window slots");
+        return -1;
+    }
+
+    win = &g_app.windows[win_idx];
+
+    // Initialize window state
+    win->active = 1;
+    win->device = dev;
+    win->scroll_x = g_default_scroll_x;  // Use global default
+    win->scroll_y = 0;
+    win->cursor_y = 0;
+    win->file_count = 0;
+    win->page_start = 0;
+
+    // Set window size based on whether this is the only window
+    if (g_app.win_count == 0) {
+        // First window - expanded mode
+        window_set_expanded(win);
+    } else {
+        // Second window opening - shrink the other window to half
+        if (win_idx == 0) {
+            window_set_half(1);  // Shrink window 1 (left)
+        } else {
+            window_set_half(0);  // Shrink window 0 (right)
+        }
+        window_set_half(win_idx);  // New window is also half
+    }
+
+    g_app.win_count++;
+
+    // Build window title from device
+    if (dev->flags & DEVICE_CART) {
+        title[0] = 'C';
+        title[1] = 'A';
+        title[2] = 'R';
+        title[3] = 'T';
+        title[4] = 0;
+    } else {
+        title[0] = 'D';
+        title[1] = 'S';
+        title[2] = 'K';
+        title[3] = '1' + (dev - g_app.devices);  // Device index
+        title[4] = 0;
+    }
+
+    // Draw window frame
+    window_draw_frame(win, title);
+
+    // Draw empty content for now
+    window_draw_content(win);
+
+    // Focus the new window
+    g_app.focus = (win_idx == 0) ? FOCUS_WINDOW1 : FOCUS_WINDOW2;
+
+    return win_idx;
+}
+
+// Close a window
+void window_close(unsigned int win_idx) {
+    Window *win;
+    unsigned int other_idx;
+
+    if (win_idx >= MAX_WINDOWS) return;
+
+    win = &g_app.windows[win_idx];
+
+    if (!win->active) return;
+
+    win->active = 0;
+    win->device = 0;
+    win->file_count = 0;
+
+    if (g_app.win_count > 0) {
+        g_app.win_count--;
+    }
+
+    // If there's still one window, expand it
+    other_idx = (win_idx == 0) ? 1 : 0;
+    if (g_app.windows[other_idx].active) {
+        window_set_expanded(&g_app.windows[other_idx]);
+    }
+
+    // If this window was focused, move focus
+    if ((win_idx == 0 && g_app.focus == FOCUS_WINDOW1) ||
+        (win_idx == 1 && g_app.focus == FOCUS_WINDOW2)) {
+        // Try to focus other window, else desktop
+        if (win_idx == 0 && g_app.windows[1].active) {
+            g_app.focus = FOCUS_WINDOW2;
+        } else if (win_idx == 1 && g_app.windows[0].active) {
+            g_app.focus = FOCUS_WINDOW1;
+        } else {
+            g_app.focus = FOCUS_DESKTOP;
+        }
+    }
+}
+
+// Toggle focus between windows and desktop
+void window_toggle_focus(void) {
+    // When both windows open: cycle Window1 <-> Window2 only (skip desktop)
+    // When one window open: cycle Desktop <-> Window
+    // When no windows: stay on desktop
+
+    if (g_app.win_count == 2) {
+        // Both windows open - toggle between them, skip desktop
+        if (g_app.focus == FOCUS_WINDOW1) {
+            g_app.focus = FOCUS_WINDOW2;
+        } else {
+            g_app.focus = FOCUS_WINDOW1;
+        }
+        return;
+    }
+
+    // One or no windows - include desktop in cycle
+    switch (g_app.focus) {
+        case FOCUS_DESKTOP:
+            if (g_app.windows[0].active) {
+                g_app.focus = FOCUS_WINDOW1;
+            } else if (g_app.windows[1].active) {
+                g_app.focus = FOCUS_WINDOW2;
+            }
+            // else stay on desktop
+            break;
+
+        case FOCUS_WINDOW1:
+            if (g_app.windows[1].active) {
+                g_app.focus = FOCUS_WINDOW2;
+            } else {
+                g_app.focus = FOCUS_DESKTOP;
+            }
+            break;
+
+        case FOCUS_WINDOW2:
+            g_app.focus = FOCUS_DESKTOP;
+            break;
+
+        default:
+            g_app.focus = FOCUS_DESKTOP;
+            break;
+    }
+}
+
+// Get currently focused window (NULL if desktop focused)
+Window *window_get_focused(void) {
+    if (g_app.focus == FOCUS_WINDOW1 && g_app.windows[0].active) {
+        return &g_app.windows[0];
+    }
+    if (g_app.focus == FOCUS_WINDOW2 && g_app.windows[1].active) {
+        return &g_app.windows[1];
+    }
+    return 0;
+}
+
+// Get window title (device name)
+// Writes to buf (must be at least 8 chars)
+void window_get_title(Window *win, char *buf) {
+    Device *dev;
+
+    if (!win || !win->device) {
+        buf[0] = '?';
+        buf[1] = 0;
+        return;
+    }
+
+    dev = win->device;
+
+    if (dev->flags & DEVICE_CART) {
+        buf[0] = 'C';
+        buf[1] = 'A';
+        buf[2] = 'R';
+        buf[3] = 'T';
+        buf[4] = 0;
+    } else {
+        buf[0] = 'D';
+        buf[1] = 'S';
+        buf[2] = 'K';
+        buf[3] = '1' + (dev - g_app.devices);
+        buf[4] = 0;
+    }
+}
+
+// Scroll window content left
+void window_scroll_left(Window *win) {
+    if (!win || !win->active) return;
+
+    if (win->scroll_x > 0) {
+        win->scroll_x--;
+        g_default_scroll_x = win->scroll_x;  // Remember as default
+        window_draw_content(win);
+    }
+}
+
+// Scroll window content right
+void window_scroll_right(Window *win) {
+    if (!win || !win->active) return;
+
+    // Max scroll is line length minus visible width
+    if (win->scroll_x < FILE_LINE_LEN - (win->w - 4)) {
+        win->scroll_x++;
+        g_default_scroll_x = win->scroll_x;  // Remember as default
+        window_draw_content(win);
+    }
+}
+
+// Move cursor up in file list
+void window_cursor_up(Window *win) {
+    if (!win || !win->active) return;
+
+    if (win->cursor_y > 0) {
+        win->cursor_y--;
+        window_draw_content(win);
+    }
+}
+
+// Move cursor down in file list
+void window_cursor_down(Window *win) {
+    if (!win || !win->active) return;
+
+    if (win->cursor_y + 1 < win->file_count) {
+        win->cursor_y++;
+        window_draw_content(win);
+    }
+}
+
+// Forward declaration from device.c
+extern unsigned int device_read_dir(Device *dev, FileEntry *files, unsigned int max_files, unsigned int page);
+
+// Load directory entries into window from device
+void window_load_dir(Window *win, unsigned int page) {
+    if (!win || !win->active || !win->device) return;
+
+    // Reset window state for new page
+    win->cursor_y = 0;
+    win->page_start = page;
+
+    // Read directory from device
+    win->file_count = device_read_dir(win->device, win->files, WIN_MAX_FILES, page);
+
+    // Redraw content
+    window_draw_content(win);
+}
+
+// Page up (previous page of files)
+void window_page_up(Window *win) {
+    if (!win || !win->active) return;
+
+    if (win->page_start > 0) {
+        window_load_dir(win, win->page_start - 1);
+    }
+}
+
+// Page down (next page of files)
+void window_page_down(Window *win) {
+    if (!win || !win->active) return;
+
+    // Only page down if current page is full
+    if (win->file_count >= WIN_MAX_FILES) {
+        window_load_dir(win, win->page_start + 1);
+    }
+}
+
+// Redraw all active windows
+void window_redraw_all(void) {
+    unsigned int i;
+    char title[12];
+    Window *win;
+    Device *dev;
+
+    for (i = 0; i < MAX_WINDOWS; i++) {
+        win = &g_app.windows[i];
+        if (!win->active) continue;
+
+        dev = win->device;
+
+        // Build title
+        if (dev && (dev->flags & DEVICE_CART)) {
+            title[0] = 'C'; title[1] = 'A'; title[2] = 'R'; title[3] = 'T'; title[4] = 0;
+        } else if (dev) {
+            title[0] = 'D'; title[1] = 'S'; title[2] = 'K';
+            title[3] = '1' + (dev - g_app.devices);
+            title[4] = 0;
+        } else {
+            title[0] = '?'; title[1] = 0;
+        }
+
+        window_draw_frame(win, title);
+        window_draw_content(win);
+    }
+}
+
+// Add a test file to a window (for testing)
+void window_add_test_file(Window *win, const char *name, unsigned int type, unsigned int size, unsigned int rec_len) {
+    FileEntry *file;
+    unsigned int i;
+
+    if (!win || win->file_count >= WIN_MAX_FILES) return;
+
+    file = &win->files[win->file_count];
+
+    // Copy name
+    for (i = 0; i < 31 && name[i]; i++) {
+        file->name[i] = name[i];
+    }
+    file->name[i] = 0;
+
+    file->type = type;
+    file->size = size;
+    file->rec_len = rec_len;
+
+    win->file_count++;
+}

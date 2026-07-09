@@ -19,7 +19,35 @@
 // Maximum limits
 #define MAX_DEVICES     9       // Devices 1-9, hotkey addressable
 #define MAX_DIR_ENTRIES 64      // Max files shown in a directory
-#define MAX_WINDOWS     2       // Desktop + one open device window
+#define MAX_WINDOWS     2       // Two non-overlapped windows max
+
+// Window configuration
+// Window 1 opens on right half, Window 2 opens on left half
+#define WIN_WIDTH       16      // Each window is half screen width
+#define WIN_HEIGHT      20      // Available height (rows 2-21, leaving title+dividers)
+#define WIN_CONTENT_W   14      // Content width (minus borders)
+#define WIN_CONTENT_H   18      // Content height (minus title+border)
+#define WIN_MAX_FILES   20      // Max files per window page
+#define WIN_BUF_COLS    64      // Internal buffer width (for panning)
+#define WIN_BUF_ROWS    20      // Internal buffer height
+
+// File display format: <size 4> <type 5> <filename 32> = 43 chars
+// Format: "999K PROG  FILENAME..." or "999K DV128 FILENAME..."
+#define FILE_COL_SIZE   0       // Size column start
+#define FILE_COL_TYPE   5       // Type column start (after "999K ")
+#define FILE_COL_NAME   11      // Name column start (after "DV128 ")
+#define FILE_NAME_LEN   32      // Max filename length
+#define FILE_LINE_LEN   43      // Total line length
+
+// Window positions (Y is row 2, below title bar and divider)
+#define WIN1_X          16      // Right half (dual window mode)
+#define WIN1_Y          2
+#define WIN2_X          0       // Left half (dual window mode)
+#define WIN2_Y          2
+
+// Expanded window (single window mode) - leaves first icon column visible
+#define WIN_EXPANDED_X  7       // Start after first icon column
+#define WIN_EXPANDED_W  25      // Full width minus icon column
 
 // Icon characters (2x2 icons, 4 chars each)
 // Floppy disk icon (chars 128-131)
