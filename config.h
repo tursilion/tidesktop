@@ -1,0 +1,119 @@
+// config.h - TI-99/4A Desktop Environment Configuration
+#ifndef CONFIG_H
+#define CONFIG_H
+
+// VDP Memory Layout (Graphics I Mode)
+#define VDP_PDT         0x0000  // Pattern Descriptor Table (2KB)
+#define VDP_SIT         0x0800  // Screen Image Table (768 bytes)
+#define VDP_SAL         0x0B00  // Sprite Attribute List (128 bytes)
+#define VDP_CT          0x0380  // Color Table (32 bytes in GR1)
+#define VDP_SDT         0x1000  // Sprite Descriptor Table (2KB)
+#define VDP_PAB         0x1800  // PAB area for file ops (2KB)
+#define VDP_FILEBUF     0x1900  // File data buffer
+#define VDP_DIRBUF      0x2000  // Directory cache (8KB available)
+
+// Screen dimensions (Graphics I)
+#define SCREEN_WIDTH    32
+#define SCREEN_HEIGHT   24
+
+// Maximum limits
+#define MAX_DEVICES     9       // Devices 1-9, hotkey addressable
+#define MAX_DIR_ENTRIES 64      // Max files shown in a directory
+#define MAX_WINDOWS     2       // Desktop + one open device window
+
+// Icon characters (2x2 icons, 4 chars each)
+// Floppy disk icon (chars 128-131)
+#define CHAR_DISK_TL    128
+#define CHAR_DISK_TR    129
+#define CHAR_DISK_BL    130
+#define CHAR_DISK_BR    131
+
+// Cartridge icon (chars 132-135)
+#define CHAR_CART_TL    132
+#define CHAR_CART_TR    133
+#define CHAR_CART_BL    134
+#define CHAR_CART_BR    135
+
+// Hard drive icon (chars 136-139)
+#define CHAR_HD_TL      136
+#define CHAR_HD_TR      137
+#define CHAR_HD_BL      138
+#define CHAR_HD_BR      139
+
+// RAM disk icon (chars 140-143)
+#define CHAR_RAM_TL     140
+#define CHAR_RAM_TR     141
+#define CHAR_RAM_BL     142
+#define CHAR_RAM_BR     143
+
+// Futuristic title bar (chars 144-147)
+#define CHAR_TITLE_L    144     // Title bar left cap (angular)
+#define CHAR_TITLE_FILL 145     // Title bar fill
+#define CHAR_TITLE_R    146     // Title bar right cap (angular)
+#define CHAR_TITLE_TEXT 147     // Title bar text area (recessed)
+
+// Divider and window elements (chars 148-151)
+#define CHAR_DIVIDER    148     // Divider line (for top/bottom)
+#define CHAR_WIN_V      149     // Vertical line
+#define CHAR_WIN_TL     150     // Window corner top-left
+#define CHAR_WIN_TR     151     // Window corner top-right
+
+// File icons (chars 152-155)
+#define CHAR_FILE_TL    152
+#define CHAR_FILE_TR    153
+#define CHAR_FILE_BL    154
+#define CHAR_FILE_BR    155
+
+// Program file icons (chars 156-159)
+#define CHAR_PROG_TL    156
+#define CHAR_PROG_TR    157
+#define CHAR_PROG_BL    158
+#define CHAR_PROG_BR    159
+
+// Selection brackets - side brackets for 4x2 selection (chars 160-163)
+#define CHAR_SEL_LT     160     // Selection left-top
+#define CHAR_SEL_LB     161     // Selection left-bottom
+#define CHAR_SEL_RT     162     // Selection right-top
+#define CHAR_SEL_RB     163     // Selection right-bottom
+
+// Additional window elements (chars 164-167)
+#define CHAR_WIN_BL     164     // Window corner bottom-left
+#define CHAR_WIN_BR     165     // Window corner bottom-right
+#define CHAR_WIN_H      166     // Horizontal line (window)
+#define CHAR_MENU_ARROW 167     // Menu arrow indicator
+
+// Title bar mini-font (chars 168-204)
+// Small 4-row font for inset title bar text
+// 168-177: digits 0-9
+// 178-203: letters A-Z
+// 204: space
+#define CHAR_TITLE_FONT_BASE  168
+#define CHAR_TITLE_FONT_SPACE 204
+
+// Device type flags
+#define DEVICE_NONE     0x00
+#define DEVICE_CART     0x01    // Cartridge pseudo-device
+#define DEVICE_DISK     0x02    // Floppy disk
+#define DEVICE_HD       0x04    // Hard drive / CF card
+#define DEVICE_RAMDISK  0x08    // RAM disk
+
+// File type constants (from TI disk format)
+#define FTYPE_DIS_FIX   0x00    // Display Fixed
+#define FTYPE_DIS_VAR   0x01    // Display Variable
+#define FTYPE_INT_FIX   0x02    // Internal Fixed
+#define FTYPE_INT_VAR   0x03    // Internal Variable
+#define FTYPE_PROGRAM   0x05    // Program file
+
+// Hotkey codes (returned by kscan in mode 5)
+#define KEY_1           '1'
+#define KEY_9           '9'
+#define KEY_M           'M'
+#define KEY_R           'R'
+#define KEY_C           'C'
+#define KEY_V           'V'
+#define KEY_D           'D'
+#define KEY_S           'S'
+#define KEY_E           'E'     // Fctn-E = up
+#define KEY_X           'X'     // Fctn-X = down
+
+#endif // CONFIG_H
