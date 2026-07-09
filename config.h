@@ -17,9 +17,18 @@
 #define SCREEN_HEIGHT   24
 
 // Maximum limits
-#define MAX_DEVICES     9       // Devices 1-9, hotkey addressable
+#define MAX_DEVICES     40      // 8x5 grid on desktop (hotkeys for first 9)
 #define MAX_DIR_ENTRIES 64      // Max files shown in a directory
 #define MAX_WINDOWS     2       // Two non-overlapped windows max
+#define MAX_SCAN_DEVICES 64     // Max devices found during scan
+
+// Desktop icon grid layout
+#define ICON_COLS       8       // Icons per row
+#define ICON_ROWS       5       // Rows of icons
+#define ICON_COL_WIDTH  4       // Columns per icon slot
+#define ICON_ROW_HEIGHT 4       // Rows per icon slot (2 icon + 1 label + 1 space)
+#define ICON_START_ROW  2       // First row for icons
+#define ICON_START_COL  0       // First column for icons
 
 // Window configuration
 // Window 1 opens on right half, Window 2 opens on left half

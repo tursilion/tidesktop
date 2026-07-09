@@ -22,6 +22,8 @@ extern void window_page_up(Window *win);
 extern void window_page_down(Window *win);
 extern void window_get_title(Window *win, char *buf);
 extern void window_load_dir(Window *win, unsigned int page);
+extern void window_draw_indicator(void);
+extern void window_show(Window *win);
 
 // Forward declarations from device.c
 extern unsigned int device_read_dir(Device *dev, FileEntry *files, unsigned int max_files, unsigned int page);
@@ -77,10 +79,12 @@ static void input_nav_up(void) {
         }
         return;
     }
-    if (g_selected >= 4) {
+    // Column-major: up moves by 1 within column
+    if (g_selected > 0 && (g_selected % ICON_ROWS) > 0) {
         ui_select_device(g_selected, 0);
-        g_selected -= 4;
+        g_selected--;
         ui_select_device(g_selected, 1);
+        window_draw_indicator();
     }
 }
 
@@ -103,10 +107,12 @@ static void input_nav_down(void) {
         }
         return;
     }
-    if (g_selected + 4 < (int)g_app.device_count) {
+    // Column-major: down moves by 1 within column
+    if (g_selected + 1 < (int)g_app.device_count && ((g_selected + 1) % ICON_ROWS) != 0) {
         ui_select_device(g_selected, 0);
-        g_selected += 4;
+        g_selected++;
         ui_select_device(g_selected, 1);
+        window_draw_indicator();
     }
 }
 
@@ -129,10 +135,12 @@ static void input_nav_left(void) {
         }
         return;
     }
-    if (g_selected > 0) {
+    // Column-major: left moves by ICON_ROWS to previous column
+    if (g_selected >= ICON_ROWS) {
         ui_select_device(g_selected, 0);
-        g_selected--;
+        g_selected -= ICON_ROWS;
         ui_select_device(g_selected, 1);
+        window_draw_indicator();
     }
 }
 
@@ -155,10 +163,12 @@ static void input_nav_right(void) {
         }
         return;
     }
-    if (g_selected + 1 < (int)g_app.device_count) {
+    // Column-major: right moves by ICON_ROWS to next column
+    if (g_selected + ICON_ROWS < (int)g_app.device_count) {
         ui_select_device(g_selected, 0);
-        g_selected++;
+        g_selected += ICON_ROWS;
         ui_select_device(g_selected, 1);
+        window_draw_indicator();
     }
 }
 
@@ -208,21 +218,26 @@ static void input_open(void) {
     }
 }
 
+// Forward declaration from device.c
+extern void device_scan(void);
+
 // Handle Scan - enumerate devices via CRU
 static void input_scan(void) {
-    // TODO: Implement CRU scanning
-    ui_status("Scanning devices...");
+    device_scan();
 }
 
 // Handle Menu
 static void input_menu(void) {
     // TODO: Implement menu display
+    // Menu should include option to enter device name manually
+    // (for devices not found by scan or with custom names)
     ui_status("Menu not implemented");
 }
 
 // Handle Fctn-9 (back/close/deselect)
 static void input_back(void) {
     unsigned int win_idx;
+    extern void window_redraw_all(void);
 
     if (g_app.focus == FOCUS_WINDOW1) {
         // Close window 1
@@ -231,9 +246,9 @@ static void input_back(void) {
         // Redraw desktop to clear window area
         ui_draw_desktop();
         // Redraw remaining window if any
-        extern void window_redraw_all(void);
         window_redraw_all();
-        if (g_has_selection) {
+        // Only show selection if focus went to desktop
+        if (g_app.focus == FOCUS_DESKTOP && g_has_selection) {
             ui_select_device(g_selected, 1);
         }
     } else if (g_app.focus == FOCUS_WINDOW2) {
@@ -243,9 +258,9 @@ static void input_back(void) {
         // Redraw desktop to clear window area
         ui_draw_desktop();
         // Redraw remaining window if any
-        extern void window_redraw_all(void);
         window_redraw_all();
-        if (g_has_selection) {
+        // Only show selection if focus went to desktop
+        if (g_app.focus == FOCUS_DESKTOP && g_has_selection) {
             ui_select_device(g_selected, 1);
         }
     } else if (g_has_selection) {

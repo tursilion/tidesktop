@@ -120,10 +120,10 @@ static void ui_draw_device_icon(unsigned int idx, Device *dev) {
     unsigned int row, col;
     unsigned int tl, tr, bl, br;
 
-    // Layout: 4 icons per row, starting at row 3
-    // Each icon slot is 4 rows tall (2 for icon + 1 blank + 1 for label)
-    row = 3 + (idx / 4) * 4;
-    col = 2 + (idx % 4) * 7;   // 7 columns between icons (tighter spacing)
+    // Layout: 8 columns, 5 rows - fill vertically first (column-major)
+    // Each icon slot is 4 cols wide, 4 rows tall (2 icon + 1 label + 1 space)
+    row = ICON_START_ROW + (idx % ICON_ROWS) * ICON_ROW_HEIGHT;
+    col = ICON_START_COL + (idx / ICON_ROWS) * ICON_COL_WIDTH + 1;  // +1 for bracket space
 
     // Select icon based on device type
     if (dev->flags & DEVICE_CART) {
@@ -144,16 +144,8 @@ static void ui_draw_device_icon(unsigned int idx, Device *dev) {
     // Draw the 2x2 icon
     ui_draw_icon_2x2(row, col, tl, tr, bl, br);
 
-    // Draw label below icon (device name or number)
-    if (dev->flags & DEVICE_CART) {
-        ui_putstr(row + 2, col - 1, "CART", 4);
-    } else {
-        // Format: "DSK1" etc - center it under icon
-        ui_putchar(row + 2, col - 1, 'D');
-        ui_putchar(row + 2, col, 'S');
-        ui_putchar(row + 2, col + 1, 'K');
-        ui_putchar(row + 2, col + 2, '1' + idx);
-    }
+    // Draw label below icon (device name, up to 4 chars centered)
+    ui_putstr(row + 2, col - 1, dev->name, 4);
 }
 
 // Check if a column is covered by any active window
@@ -224,10 +216,9 @@ void ui_draw_desktop(void) {
     // Draw status/help text (row 23)
     ui_putstr(SCREEN_HEIGHT - 1, 1, "1-9:Dev  S:Scan  M:Menu", 23);
 
-    // Draw device icons - skip icons obscured by windows
-    // Icon positions: col 2 + (idx % 4) * 7 = cols 2, 9, 16, 23
+    // Draw device icons - skip icons obscured by windows (column-major layout)
     for (i = 0; i < g_app.device_count; i++) {
-        unsigned int icon_col = 2 + (i % 4) * 7;
+        unsigned int icon_col = ICON_START_COL + (i / ICON_ROWS) * ICON_COL_WIDTH + 1;
 
         // Skip if icon would be covered by a window
         if (ui_col_covered(icon_col)) continue;
@@ -251,9 +242,9 @@ void ui_select_device(unsigned int idx, unsigned int selected) {
 
     if (idx >= g_app.device_count) return;
 
-    // Calculate position (same as ui_draw_device_icon)
-    row = 3 + (idx / 4) * 4;
-    col = 2 + (idx % 4) * 7;
+    // Calculate position (same as ui_draw_device_icon) - column-major
+    row = ICON_START_ROW + (idx % ICON_ROWS) * ICON_ROW_HEIGHT;
+    col = ICON_START_COL + (idx / ICON_ROWS) * ICON_COL_WIDTH + 1;
 
     // Clear previous selection if visible
     if (g_sel_visible && !selected) {

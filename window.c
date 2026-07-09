@@ -354,19 +354,13 @@ int window_open(Device *dev) {
 
     g_app.win_count++;
 
-    // Build window title from device
-    if (dev->flags & DEVICE_CART) {
-        title[0] = 'C';
-        title[1] = 'A';
-        title[2] = 'R';
-        title[3] = 'T';
-        title[4] = 0;
-    } else {
-        title[0] = 'D';
-        title[1] = 'S';
-        title[2] = 'K';
-        title[3] = '1' + (dev - g_app.devices);  // Device index
-        title[4] = 0;
+    // Build window title from device name
+    {
+        unsigned int i;
+        for (i = 0; i < 11 && dev->name[i]; i++) {
+            title[i] = dev->name[i];
+        }
+        title[i] = 0;
     }
 
     // Draw window frame
@@ -420,11 +414,17 @@ void window_close(unsigned int win_idx) {
     }
 }
 
+// Forward declarations for hide/show
+void window_hide(Window *win);
+void window_show(Window *win);
+
 // Toggle focus between windows and desktop
 void window_toggle_focus(void) {
     // When both windows open: cycle Window1 <-> Window2 only (skip desktop)
-    // When one window open: cycle Desktop <-> Window
+    // When one window open: cycle Desktop <-> Window (hide/show window)
     // When no windows: stay on desktop
+
+    unsigned int old_focus = g_app.focus;
 
     if (g_app.win_count == 2) {
         // Both windows open - toggle between them, skip desktop
@@ -441,8 +441,10 @@ void window_toggle_focus(void) {
         case FOCUS_DESKTOP:
             if (g_app.windows[0].active) {
                 g_app.focus = FOCUS_WINDOW1;
+                window_show(&g_app.windows[0]);
             } else if (g_app.windows[1].active) {
                 g_app.focus = FOCUS_WINDOW2;
+                window_show(&g_app.windows[1]);
             }
             // else stay on desktop
             break;
@@ -452,11 +454,13 @@ void window_toggle_focus(void) {
                 g_app.focus = FOCUS_WINDOW2;
             } else {
                 g_app.focus = FOCUS_DESKTOP;
+                window_hide(&g_app.windows[0]);
             }
             break;
 
         case FOCUS_WINDOW2:
             g_app.focus = FOCUS_DESKTOP;
+            window_hide(&g_app.windows[1]);
             break;
 
         default:
@@ -476,6 +480,68 @@ Window *window_get_focused(void) {
     return 0;
 }
 
+// Draw window indicator strip on right edge of screen
+// Shows that a window is open but hidden
+void window_draw_indicator(void) {
+    unsigned int i;
+    unsigned int row;
+
+    // Only draw if one window is open and focus is on desktop
+    if (g_app.win_count != 1 || g_app.focus != FOCUS_DESKTOP) {
+        return;
+    }
+
+    // Draw vertical line on right edge (column 31)
+    for (i = 0; i < WIN_HEIGHT; i++) {
+        row = WIN1_Y + i;
+        vdpscreenchar(VDP_SCREEN_POS(row, SCREEN_WIDTH - 1), CHAR_WIN_V);
+    }
+}
+
+// Hide the window (erase content, show indicator)
+void window_hide(Window *win) {
+    unsigned int saved_active;
+
+    if (!win || !win->active) return;
+
+    // Temporarily mark window as inactive so ui_draw_desktop redraws full area
+    saved_active = win->active;
+    win->active = 0;
+
+    // Redraw full desktop
+    extern void ui_draw_desktop(void);
+    ui_draw_desktop();
+
+    // Restore active flag (window is still logically open, just hidden)
+    win->active = saved_active;
+
+    // Draw indicator strip on right edge
+    window_draw_indicator();
+}
+
+// Show the window (redraw fully)
+void window_show(Window *win) {
+    char title[12];
+    Device *dev;
+    unsigned int i;
+
+    if (!win || !win->active) return;
+
+    dev = win->device;
+    if (dev) {
+        for (i = 0; i < 11 && dev->name[i]; i++) {
+            title[i] = dev->name[i];
+        }
+        title[i] = 0;
+    } else {
+        title[0] = '?';
+        title[1] = 0;
+    }
+
+    window_draw_frame(win, title);
+    window_draw_content(win);
+}
+
 // Get window title (device name)
 // Writes to buf (must be at least 8 chars)
 void window_get_title(Window *win, char *buf) {
@@ -489,18 +555,13 @@ void window_get_title(Window *win, char *buf) {
 
     dev = win->device;
 
-    if (dev->flags & DEVICE_CART) {
-        buf[0] = 'C';
-        buf[1] = 'A';
-        buf[2] = 'R';
-        buf[3] = 'T';
-        buf[4] = 0;
-    } else {
-        buf[0] = 'D';
-        buf[1] = 'S';
-        buf[2] = 'K';
-        buf[3] = '1' + (dev - g_app.devices);
-        buf[4] = 0;
+    // Copy device name from struct
+    {
+        unsigned int i;
+        for (i = 0; i < 7 && dev->name[i]; i++) {
+            buf[i] = dev->name[i];
+        }
+        buf[i] = 0;
     }
 }
 
@@ -539,9 +600,14 @@ void window_cursor_up(Window *win) {
 
 // Move cursor down in file list
 void window_cursor_down(Window *win) {
+    unsigned int visible_rows;
+
     if (!win || !win->active) return;
 
-    if (win->cursor_y + 1 < win->file_count) {
+    visible_rows = win->h - 2;  // Minus borders
+
+    // Limit to both file count and visible rows
+    if (win->cursor_y + 1 < win->file_count && win->cursor_y + 1 < visible_rows) {
         win->cursor_y++;
         window_draw_content(win);
     }
@@ -552,14 +618,18 @@ extern unsigned int device_read_dir(Device *dev, FileEntry *files, unsigned int 
 
 // Load directory entries into window from device
 void window_load_dir(Window *win, unsigned int page) {
+    unsigned int visible_rows;
+
     if (!win || !win->active || !win->device) return;
+
+    visible_rows = win->h - 2;  // Minus borders
 
     // Reset window state for new page
     win->cursor_y = 0;
     win->page_start = page;
 
-    // Read directory from device
-    win->file_count = device_read_dir(win->device, win->files, WIN_MAX_FILES, page);
+    // Read directory from device (request only visible rows)
+    win->file_count = device_read_dir(win->device, win->files, visible_rows, page);
 
     // Redraw content
     window_draw_content(win);
@@ -576,10 +646,14 @@ void window_page_up(Window *win) {
 
 // Page down (next page of files)
 void window_page_down(Window *win) {
+    unsigned int visible_rows;
+
     if (!win || !win->active) return;
 
-    // Only page down if current page is full
-    if (win->file_count >= WIN_MAX_FILES) {
+    visible_rows = win->h - 2;  // Minus borders
+
+    // Only page down if current page is full (more entries may exist)
+    if (win->file_count >= visible_rows) {
         window_load_dir(win, win->page_start + 1);
     }
 }
@@ -597,13 +671,13 @@ void window_redraw_all(void) {
 
         dev = win->device;
 
-        // Build title
-        if (dev && (dev->flags & DEVICE_CART)) {
-            title[0] = 'C'; title[1] = 'A'; title[2] = 'R'; title[3] = 'T'; title[4] = 0;
-        } else if (dev) {
-            title[0] = 'D'; title[1] = 'S'; title[2] = 'K';
-            title[3] = '1' + (dev - g_app.devices);
-            title[4] = 0;
+        // Build title from device name
+        if (dev) {
+            unsigned int j;
+            for (j = 0; j < 11 && dev->name[j]; j++) {
+                title[j] = dev->name[j];
+            }
+            title[j] = 0;
         } else {
             title[0] = '?'; title[1] = 0;
         }

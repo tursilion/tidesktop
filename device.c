@@ -3,10 +3,21 @@
 #include "types.h"
 #include "grom.h"
 #include "vdp.h"
+#include "kscan.h"
 
 // Forward declarations
 extern void ui_status(const char *msg);
 extern void ui_draw_desktop(void);
+
+// Scan result entry - device name found during CRU scan
+typedef struct {
+    char name[8];           // Device name (up to 7 chars + null)
+    unsigned int cru_base;  // CRU base where found
+} ScanEntry;
+
+// Scan results buffer
+static ScanEntry g_scan_results[MAX_SCAN_DEVICES];
+static unsigned int g_scan_count;
 
 // External character set loader from libti99
 extern void charsetlc(void);
@@ -358,54 +369,391 @@ unsigned int device_read_dir(Device *dev, FileEntry *files, unsigned int max_fil
     return 0;
 }
 
-// Check if a DSR exists at the given CRU address
-// Returns 1 if found, 0 if not
-static unsigned int device_probe_cru(unsigned int cru) {
-    // TODO: Implement CRU probing
-    // 1. Turn on CRU bit 0 at the address (SBO instruction)
-    // 2. Check if ROM appears at >4000
-    // 3. Turn off CRU bit (SBZ instruction)
-    // 4. Return result
+// Enable a DSR card at CRU base
+static void cru_enable(unsigned int cru) {
+    __asm__ volatile (
+        "mov %0, r12\n\t"
+        "sbo 0"
+        :
+        : "r" (cru)
+        : "r12"
+    );
+}
 
-    (void)cru;  // Suppress unused warning for now
+// Disable a DSR card at CRU base
+static void cru_disable(unsigned int cru) {
+    __asm__ volatile (
+        "mov %0, r12\n\t"
+        "sbz 0"
+        :
+        : "r" (cru)
+        : "r12"
+    );
+}
+
+// Scan device names at a CRU address
+// Returns number of devices found at this address
+static unsigned int scan_cru_devices(unsigned int cru) {
+    volatile unsigned char *rom = (volatile unsigned char *)0x4000;
+    unsigned int list_addr;
+    unsigned int link;
+    unsigned char name_len;
+    unsigned int i;
+    unsigned int count = 0;
+    ScanEntry *entry;
+
+    // Enable the card
+    cru_enable(cru);
+
+    // Check for valid DSR header (0xAA at >4000)
+    if (rom[0] != 0xAA) {
+        cru_disable(cru);
+        return 0;
+    }
+
+    // Device name list pointer is at >4008-4009 (big endian)
+    list_addr = (rom[8] << 8) | rom[9];
+
+    // Walk the device name list
+    while (list_addr != 0 && g_scan_count < MAX_SCAN_DEVICES) {
+        volatile unsigned char *entry_ptr = (volatile unsigned char *)list_addr;
+
+        // Link to next entry (big endian word at offset 0)
+        link = (entry_ptr[0] << 8) | entry_ptr[1];
+
+        // Skip offset 2-3 (DSR entry point)
+
+        // Name length at offset 4
+        name_len = entry_ptr[4];
+        if (name_len > 7) name_len = 7;
+
+        // Copy name (starting at offset 5)
+        entry = &g_scan_results[g_scan_count];
+        for (i = 0; i < name_len; i++) {
+            entry->name[i] = entry_ptr[5 + i];
+        }
+        entry->name[name_len] = 0;
+        entry->cru_base = cru;
+
+        g_scan_count++;
+        count++;
+
+        // Move to next entry
+        list_addr = link;
+    }
+
+    // Disable the card
+    cru_disable(cru);
+
+    return count;
+}
+
+// Scan for all devices across all CRU addresses
+// Returns total number of devices found
+unsigned int device_scan_all(void) {
+    unsigned int i;
+
+    // Clear previous scan results
+    g_scan_count = 0;
+
+    // Show scanning status
+    ui_status("Scanning...");
+
+    // Scan all CRU addresses
+    for (i = 0; cru_scan_list[i] != 0 && g_scan_count < MAX_SCAN_DEVICES; i++) {
+        scan_cru_devices(cru_scan_list[i]);
+    }
+
+    return g_scan_count;
+}
+
+// Get scan result by index
+ScanEntry *device_get_scan_result(unsigned int idx) {
+    if (idx < g_scan_count) {
+        return &g_scan_results[idx];
+    }
     return 0;
 }
 
-// Get device name from DSR ROM header
-static void device_get_name(unsigned int cru, unsigned int *name) {
-    // TODO: Read device name from DSR ROM
-    // Located at >4000 area when CRU is activated
-    (void)cru;
-    *name = ('D' << 8) | 'S';  // Default "DS"
+// Get total scan count
+unsigned int device_get_scan_count(void) {
+    return g_scan_count;
 }
 
-// Scan for devices and populate g_app.devices
-void device_scan(void) {
+// Add a scanned device to the desktop
+// Returns 1 if added, 0 if desktop full
+unsigned int device_add_from_scan(unsigned int scan_idx) {
+    ScanEntry *scan;
+    Device *dev;
     unsigned int i;
-    unsigned int dev_idx;
-    unsigned int cru;
 
-    // Keep cartridge as device 0
-    dev_idx = 1;
+    if (scan_idx >= g_scan_count) return 0;
+    if (g_app.device_count >= MAX_DEVICES) return 0;
 
-    // Scan CRU addresses
-    for (i = 0; cru_scan_list[i] != 0 && dev_idx < MAX_DEVICES; i++) {
-        cru = cru_scan_list[i];
+    scan = &g_scan_results[scan_idx];
+    dev = &g_app.devices[g_app.device_count];
 
-        if (device_probe_cru(cru)) {
-            g_app.devices[dev_idx].cru_base = cru;
-            device_get_name(cru, &g_app.devices[dev_idx].name);
-            g_app.devices[dev_idx].icon = CHAR_DISK_TL;  // Icon determined by flags
-            g_app.devices[dev_idx].flags = DEVICE_DISK;
-            dev_idx++;
+    // Copy name
+    for (i = 0; i < 8; i++) {
+        dev->name[i] = scan->name[i];
+    }
+    dev->cru_base = scan->cru_base;
+
+    // Detect device type from name prefix
+    if (scan->name[0] == 'W' && scan->name[1] == 'D' && scan->name[2] == 'S') {
+        // WDSx = hard disk
+        dev->icon = CHAR_HD_TL;
+        dev->flags = DEVICE_HD;
+    } else {
+        // DSKx and others = floppy disk
+        dev->icon = CHAR_DISK_TL;
+        dev->flags = DEVICE_DISK;
+    }
+
+    g_app.device_count++;
+    return 1;
+}
+
+// Selection state for device picker
+static unsigned int g_sel_bits[4];  // 64 bits for selection state
+#define SEL_WIN_X       6
+#define SEL_WIN_Y       3
+#define SEL_WIN_W       20
+#define SEL_WIN_H       16
+#define SEL_VISIBLE     14  // Visible rows in selection window
+
+// Check if device at index is selected
+static unsigned int device_is_selected(unsigned int idx) {
+    if (idx >= 64) return 0;
+    return (g_sel_bits[idx >> 4] >> (idx & 15)) & 1;
+}
+
+// Toggle selection at index
+static void device_toggle_selected(unsigned int idx) {
+    if (idx >= 64) return;
+    g_sel_bits[idx >> 4] ^= (1 << (idx & 15));
+}
+
+// Draw the selection window content
+static void device_draw_sel_content(unsigned int scroll, unsigned int cursor) {
+    unsigned int i;
+    unsigned int row;
+    unsigned int visible;
+    ScanEntry *entry;
+
+    visible = (g_scan_count < SEL_VISIBLE) ? g_scan_count : SEL_VISIBLE;
+
+    for (i = 0; i < SEL_VISIBLE; i++) {
+        row = SEL_WIN_Y + 1 + i;
+        unsigned int idx = scroll + i;
+
+        // Clear line
+        hchar(row, SEL_WIN_X + 1, ' ', SEL_WIN_W - 2);
+
+        if (idx < g_scan_count) {
+            entry = &g_scan_results[idx];
+
+            // Cursor indicator
+            if (idx == cursor) {
+                vdpscreenchar(VDP_SCREEN_POS(row, SEL_WIN_X + 1), '>');
+            }
+
+            // Selection checkbox
+            if (device_is_selected(idx)) {
+                vdpscreenchar(VDP_SCREEN_POS(row, SEL_WIN_X + 2), '[');
+                vdpscreenchar(VDP_SCREEN_POS(row, SEL_WIN_X + 3), '*');
+                vdpscreenchar(VDP_SCREEN_POS(row, SEL_WIN_X + 4), ']');
+            } else {
+                vdpscreenchar(VDP_SCREEN_POS(row, SEL_WIN_X + 2), '[');
+                vdpscreenchar(VDP_SCREEN_POS(row, SEL_WIN_X + 3), ' ');
+                vdpscreenchar(VDP_SCREEN_POS(row, SEL_WIN_X + 4), ']');
+            }
+
+            // Device name
+            {
+                unsigned int addr = gImage + VDP_SCREEN_POS(row, SEL_WIN_X + 6);
+                unsigned int j;
+                VDP_SET_ADDRESS_WRITE(addr);
+                for (j = 0; j < 7 && entry->name[j]; j++) {
+                    VDPWD(entry->name[j]);
+                }
+            }
+        }
+    }
+}
+
+// Draw the selection window frame
+static void device_draw_sel_window(void) {
+    unsigned int i;
+
+    // Top border
+    vdpscreenchar(VDP_SCREEN_POS(SEL_WIN_Y, SEL_WIN_X), CHAR_WIN_TL);
+    hchar(SEL_WIN_Y, SEL_WIN_X + 1, CHAR_WIN_H, SEL_WIN_W - 2);
+    vdpscreenchar(VDP_SCREEN_POS(SEL_WIN_Y, SEL_WIN_X + SEL_WIN_W - 1), CHAR_WIN_TR);
+
+    // Title
+    {
+        unsigned int addr = gImage + VDP_SCREEN_POS(SEL_WIN_Y, SEL_WIN_X + 2);
+        VDP_SET_ADDRESS_WRITE(addr);
+        VDPWD('S'); VDPWD('e'); VDPWD('l'); VDPWD('e'); VDPWD('c'); VDPWD('t');
+        VDPWD(' '); VDPWD('D'); VDPWD('e'); VDPWD('v'); VDPWD('i'); VDPWD('c');
+        VDPWD('e'); VDPWD('s');
+    }
+
+    // Side borders and clear interior
+    for (i = 1; i < SEL_WIN_H - 1; i++) {
+        vdpscreenchar(VDP_SCREEN_POS(SEL_WIN_Y + i, SEL_WIN_X), CHAR_WIN_V);
+        hchar(SEL_WIN_Y + i, SEL_WIN_X + 1, ' ', SEL_WIN_W - 2);
+        vdpscreenchar(VDP_SCREEN_POS(SEL_WIN_Y + i, SEL_WIN_X + SEL_WIN_W - 1), CHAR_WIN_V);
+    }
+
+    // Bottom border
+    vdpscreenchar(VDP_SCREEN_POS(SEL_WIN_Y + SEL_WIN_H - 1, SEL_WIN_X), CHAR_WIN_BL);
+    hchar(SEL_WIN_Y + SEL_WIN_H - 1, SEL_WIN_X + 1, CHAR_WIN_H, SEL_WIN_W - 2);
+    vdpscreenchar(VDP_SCREEN_POS(SEL_WIN_Y + SEL_WIN_H - 1, SEL_WIN_X + SEL_WIN_W - 1), CHAR_WIN_BR);
+}
+
+// Run the device selection dialog
+// Returns number of devices added
+static unsigned int device_run_selection(void) {
+    unsigned int cursor = 0;
+    unsigned int scroll = 0;
+    unsigned int key;
+    unsigned int added = 0;
+    unsigned int i;
+
+    // Clear selection bits
+    for (i = 0; i < 4; i++) {
+        g_sel_bits[i] = 0;
+    }
+
+    // Draw window
+    device_draw_sel_window();
+    device_draw_sel_content(scroll, cursor);
+    ui_status("Space:Sel  Enter:Add  Fctn-9:Cancel");
+
+    // Input loop
+    for (;;) {
+        kscan(KSCAN_MODE_BASIC);
+        key = KSCAN_KEY;
+
+        if (key == KSCAN_NOKEY) continue;
+
+        // Small delay for debounce
+        {
+            volatile unsigned int d;
+            for (d = 0; d < 1000; d++);
+        }
+
+        // Wait for key release
+        while (KSCAN_KEY != KSCAN_NOKEY) {
+            kscan(KSCAN_MODE_BASIC);
+        }
+
+        if (key == KEY_BACK) {
+            // Cancel - no devices added
+            break;
+        }
+
+        if (key == KEY_ENTER) {
+            // Add all selected devices
+            for (i = 0; i < g_scan_count && g_app.device_count < MAX_DEVICES; i++) {
+                if (device_is_selected(i)) {
+                    device_add_from_scan(i);
+                    added++;
+                }
+            }
+            break;
+        }
+
+        if (key == KEY_UP && cursor > 0) {
+            cursor--;
+            if (cursor < scroll) {
+                scroll = cursor;
+            }
+            device_draw_sel_content(scroll, cursor);
+        }
+
+        if (key == KEY_DOWN && cursor + 1 < g_scan_count) {
+            cursor++;
+            if (cursor >= scroll + SEL_VISIBLE) {
+                scroll = cursor - SEL_VISIBLE + 1;
+            }
+            device_draw_sel_content(scroll, cursor);
+        }
+
+        if (key == ' ') {
+            // Toggle selection
+            device_toggle_selected(cursor);
+            device_draw_sel_content(scroll, cursor);
+        }
+
+        if (key == KEY_PROCEED) {
+            // Page up
+            if (cursor >= SEL_VISIBLE) {
+                cursor -= SEL_VISIBLE;
+                scroll = cursor;
+            } else {
+                cursor = 0;
+                scroll = 0;
+            }
+            device_draw_sel_content(scroll, cursor);
+        }
+
+        if (key == KEY_CLEAR) {
+            // Page down
+            if (cursor + SEL_VISIBLE < g_scan_count) {
+                cursor += SEL_VISIBLE;
+                scroll = cursor;
+                // Don't scroll past last page
+                if (scroll + SEL_VISIBLE > g_scan_count) {
+                    scroll = (g_scan_count > SEL_VISIBLE) ? g_scan_count - SEL_VISIBLE : 0;
+                }
+            } else {
+                cursor = g_scan_count - 1;
+            }
+            device_draw_sel_content(scroll, cursor);
         }
     }
 
-    g_app.device_count = dev_idx;
+    return added;
+}
+
+// Main scan function - scans and opens selection window
+void device_scan(void) {
+    unsigned int count;
+    unsigned int added;
+
+    count = device_scan_all();
+
+    if (count == 0) {
+        ui_status("No devices found");
+        return;
+    }
+
+    // Run selection dialog
+    added = device_run_selection();
 
     // Redraw desktop with new devices
     ui_draw_desktop();
-    ui_status("Scan complete");
+
+    // Show result
+    if (added > 0) {
+        char msg[20];
+        msg[0] = 'A'; msg[1] = 'd'; msg[2] = 'd'; msg[3] = 'e';
+        msg[4] = 'd'; msg[5] = ' ';
+        if (added >= 10) {
+            msg[6] = '0' + (added / 10);
+            msg[7] = '0' + (added % 10);
+            msg[8] = 0;
+        } else {
+            msg[6] = '0' + added;
+            msg[7] = 0;
+        }
+        ui_status(msg);
+    } else {
+        ui_status("Cancelled");
+    }
 }
 
 // Open a device and read its directory

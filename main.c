@@ -67,7 +67,7 @@ static void app_init(void) {
     // Clear device list
     for (i = 0; i < MAX_DEVICES; i++) {
         g_app.devices[i].cru_base = 0;
-        g_app.devices[i].name = 0;
+        g_app.devices[i].name[0] = 0;
         g_app.devices[i].icon = 0;
         g_app.devices[i].flags = DEVICE_NONE;
     }
@@ -76,7 +76,11 @@ static void app_init(void) {
 
     // Add cartridge as first device (always present)
     g_app.devices[0].cru_base = 0;
-    g_app.devices[0].name = ('C' << 8) | 'T';  // "CT" for cartridge
+    g_app.devices[0].name[0] = 'C';
+    g_app.devices[0].name[1] = 'A';
+    g_app.devices[0].name[2] = 'R';
+    g_app.devices[0].name[3] = 'T';
+    g_app.devices[0].name[4] = 0;
     g_app.devices[0].icon = CHAR_CART_TL;      // Icon determined by flags in UI
     g_app.devices[0].flags = DEVICE_CART;
     g_app.device_count = 1;

@@ -21,7 +21,7 @@
 // Device entry - represents a device icon on the desktop
 typedef struct {
     unsigned int cru_base;      // CRU address (0 for cartridge)
-    unsigned int name;          // Device name as packed chars (e.g., 'D'<<8|'1')
+    char name[8];               // Device name (up to 7 chars + null)
     unsigned int icon;          // Character code for icon (use int to avoid char issues)
     unsigned int flags;         // DEVICE_DISK, DEVICE_CART, etc
 } Device;
