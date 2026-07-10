@@ -77,4 +77,8 @@ extern const char *g_title_string;
 // Convert ASCII to title bar mini-font character
 extern unsigned int char_to_title(unsigned int c);
 
+// Clock (RTC) support
+extern unsigned int g_clock_available;  // 1 if CLOCK device found
+extern unsigned int g_clock_cru;        // CRU base of clock device
+
 #endif // TYPES_H

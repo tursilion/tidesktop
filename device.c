@@ -4,10 +4,12 @@
 #include "grom.h"
 #include "vdp.h"
 #include "kscan.h"
+#include "files.h"
 
 // Forward declarations
 extern void ui_status(const char *msg);
 extern void ui_draw_desktop(void);
+void clock_update_display(void);
 
 // Scan result entry - device name found during CRU scan
 typedef struct {
@@ -480,17 +482,32 @@ unsigned int device_get_scan_count(void) {
     return g_scan_count;
 }
 
+// Check if name matches "CLOCK"
+static unsigned int is_clock_device(const char *name) {
+    return (name[0] == 'C' && name[1] == 'L' && name[2] == 'O' &&
+            name[3] == 'C' && name[4] == 'K' && (name[5] == 0 || name[5] == ' '));
+}
+
 // Add a scanned device to the desktop
-// Returns 1 if added, 0 if desktop full
+// Returns 1 if added, 0 if desktop full or special device (CLOCK)
 unsigned int device_add_from_scan(unsigned int scan_idx) {
     ScanEntry *scan;
     Device *dev;
     unsigned int i;
 
     if (scan_idx >= g_scan_count) return 0;
-    if (g_app.device_count >= MAX_DEVICES) return 0;
 
     scan = &g_scan_results[scan_idx];
+
+    // Check for CLOCK device - don't add icon, just set flag
+    if (is_clock_device(scan->name)) {
+        g_clock_available = 1;
+        g_clock_cru = scan->cru_base;
+        return 0;  // Don't add as icon
+    }
+
+    if (g_app.device_count >= MAX_DEVICES) return 0;
+
     dev = &g_app.devices[g_app.device_count];
 
     // Copy name
@@ -659,8 +676,10 @@ static unsigned int device_run_selection(void) {
             // Add all selected devices
             for (i = 0; i < g_scan_count && g_app.device_count < MAX_DEVICES; i++) {
                 if (device_is_selected(i)) {
-                    device_add_from_scan(i);
-                    added++;
+                    // Only count if actually added (CLOCK returns 0)
+                    if (device_add_from_scan(i)) {
+                        added++;
+                    }
                 }
             }
             break;
@@ -723,6 +742,10 @@ static unsigned int device_run_selection(void) {
 void device_scan(void) {
     unsigned int count;
     unsigned int added;
+    unsigned int clock_was_set;
+
+    // Remember if clock was already set before scan
+    clock_was_set = g_clock_available;
 
     count = device_scan_all();
 
@@ -736,6 +759,11 @@ void device_scan(void) {
 
     // Redraw desktop with new devices
     ui_draw_desktop();
+
+    // If clock was newly found, update display immediately
+    if (g_clock_available && !clock_was_set) {
+        clock_update_display();
+    }
 
     // Show result
     if (added > 0) {
@@ -751,6 +779,8 @@ void device_scan(void) {
             msg[7] = 0;
         }
         ui_status(msg);
+    } else if (g_clock_available && !clock_was_set) {
+        ui_status("Clock enabled");
     } else {
         ui_status("Cancelled");
     }
@@ -842,4 +872,128 @@ void cart_launch_grom(unsigned int entry_addr, unsigned int port) {
     );
     // Never reached
     for (;;);
+}
+
+// ============================================================================
+// Clock (RTC) Support
+// ============================================================================
+
+// PAB address for clock operations (use safe area at >2800)
+// Normal TI disk system reduces VDP from top (>37D7), so avoid high addresses
+#define CLOCK_PAB_ADDR  0x2800
+#define CLOCK_BUF_ADDR  0x2820
+
+// Clock device name
+static const char clock_name[] = "CLOCK";
+
+// Last displayed time (to avoid redrawing if unchanged)
+static char g_last_time[9] = {0};
+
+// Read time from CLOCK device
+// Returns 1 if successful, 0 on error
+// time_buf should be at least 9 bytes (HH:MM:SS + null)
+unsigned int clock_read_time(char *time_buf) {
+    struct PAB pab;
+    unsigned char result;
+    unsigned char data[24];
+    unsigned int i;
+    unsigned int field;
+    unsigned int out_idx;
+    unsigned int char_count;
+
+    if (!g_clock_available) return 0;
+
+    // Set up PAB for OPEN
+    pab.OpCode = DSR_OPEN;
+    pab.Status = DSR_TYPE_VARIABLE | DSR_TYPE_DISPLAY | DSR_TYPE_UPDATE;
+    pab.VDPBuffer = CLOCK_BUF_ADDR;
+    pab.RecordLength = 0;  // Auto-detect
+    pab.CharCount = 0;
+    pab.RecordNumber = 0;
+    pab.ScreenOffset = 0;
+    pab.NameLength = 5;
+    pab.pName = (unsigned char *)clock_name;
+
+    // Open the device
+    result = dsrlnk(&pab, CLOCK_PAB_ADDR);
+    if (result != 0) {
+        return 0;
+    }
+
+    // Read back the record length from VDP (DSR updates it)
+    pab.RecordLength = vdpreadchar(CLOCK_PAB_ADDR + 4);
+
+    // Set up PAB for READ
+    pab.OpCode = DSR_READ;
+    pab.CharCount = 0;
+
+    // Read the record
+    result = dsrlnk(&pab, CLOCK_PAB_ADDR);
+    if (result != 0) {
+        // Close and return error
+        pab.OpCode = DSR_CLOSE;
+        dsrlnk(&pab, CLOCK_PAB_ADDR);
+        return 0;
+    }
+
+    // Read back CharCount from VDP (DSR updates it)
+    char_count = vdpreadchar(CLOCK_PAB_ADDR + 5);
+    if (char_count > 23) char_count = 23;
+
+    // Read data from VDP buffer
+    vdpmemread(CLOCK_BUF_ADDR, data, char_count);
+    data[char_count] = 0;
+
+    // Close the device
+    pab.OpCode = DSR_CLOSE;
+    dsrlnk(&pab, CLOCK_PAB_ADDR);
+
+    // Parse the data - format is "dow,date,time"
+    // We want the third field (time)
+    field = 0;
+    out_idx = 0;
+    for (i = 0; data[i] && out_idx < 8; i++) {
+        if (data[i] == ',') {
+            field++;
+        } else if (field == 2) {
+            // We're in the time field
+            time_buf[out_idx++] = data[i];
+        }
+    }
+    time_buf[out_idx] = 0;
+
+    return (out_idx > 0) ? 1 : 0;
+}
+
+// Update the clock display on screen
+// Called periodically from main loop
+void clock_update_display(void) {
+    char time_buf[9];
+    unsigned int i;
+    unsigned int col;
+    unsigned int changed;
+
+    if (!g_clock_available) return;
+
+    // Read current time
+    if (!clock_read_time(time_buf)) return;
+
+    // Check if time changed
+    changed = 0;
+    for (i = 0; i < 8; i++) {
+        if (time_buf[i] != g_last_time[i]) {
+            changed = 1;
+            g_last_time[i] = time_buf[i];
+        }
+        if (time_buf[i] == 0) break;
+    }
+
+    if (!changed) return;
+
+    // Display time on bottom separator (row 22, right side)
+    // Time is up to 8 chars (HH:MM:SS), display at right edge
+    col = SCREEN_WIDTH - 9;  // Leave 1 char margin
+    for (i = 0; time_buf[i] && i < 8; i++) {
+        vdpscreenchar(VDP_SCREEN_POS(SCREEN_HEIGHT - 2, col + i), time_buf[i]);
+    }
 }

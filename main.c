@@ -10,6 +10,7 @@ extern void ui_draw_desktop(void);
 extern void input_process(void);
 extern void chars_init(void);
 extern void window_init(void);
+extern void clock_update_display(void);
 
 // Global application state
 AppState g_app;
@@ -25,6 +26,10 @@ unsigned int g_color_divider = COLOR_DKGREEN;  // Divider line color
 
 // Global title string (customizable)
 const char *g_title_string = "TI DESKTOP";
+
+// Clock (RTC) support
+unsigned int g_clock_available = 0;  // 1 if CLOCK device found
+unsigned int g_clock_cru = 0;        // CRU base of clock device
 
 // Initialize the VDP for Graphics II (bitmap) mode
 // We use bitmap mode but treat it like character mode for per-row colors
@@ -104,12 +109,23 @@ int main(void) {
     ui_draw_desktop();
 
     // Main event loop
-    for (;;) {
-        // Wait for vblank to pace the loop
-        vdpwaitvint();
+    {
+        unsigned int clock_counter = 0;
 
-        // Process keyboard input
-        input_process();
+        for (;;) {
+            // Wait for vblank to pace the loop
+            vdpwaitvint();
+
+            // Process keyboard input
+            input_process();
+
+            // Update clock display periodically (every ~1 second at 60Hz)
+            clock_counter++;
+            if (clock_counter >= 60) {
+                clock_counter = 0;
+                clock_update_display();
+            }
+        }
     }
 
     return 0;
