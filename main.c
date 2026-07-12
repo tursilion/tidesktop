@@ -22,7 +22,8 @@ unsigned int g_color_fg      = COLOR_WHITE;    // Text foreground
 unsigned int g_color_desktop = COLOR_DKBLUE;   // Desktop background
 unsigned int g_color_icon    = COLOR_WHITE;    // Icon foreground
 unsigned int g_color_select  = COLOR_LTGREEN;  // Selection brackets
-unsigned int g_color_title   = COLOR_CYAN;     // Title bar accent
+unsigned int g_color_title_bg= COLOR_CYAN;     // Title bar accent
+unsigned int g_color_title_fg= COLOR_WHITE;    // Title bar text
 unsigned int g_color_divider = COLOR_DKGREEN;  // Divider line color
 
 // Global title string (customizable)
@@ -54,11 +55,6 @@ static void vdp_init(void) {
 
     // Clear the screen - no need to clear the pattern table before loading it - every byte counts
     vdpmemset(gImage, ' ', SCREEN_WIDTH * SCREEN_HEIGHT);
-
-    // Set default colors for all characters using globals
-    // In bitmap mode, each char has 8 color bytes (one per row)
-    default_color = (g_color_fg << 4) | g_color_desktop;
-    vdpmemset(gColor, default_color, 256 * 8);
 
     // Load custom character patterns and set up per-char colors
     chars_init();

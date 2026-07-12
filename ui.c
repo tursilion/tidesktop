@@ -125,21 +125,12 @@ static void ui_draw_device_icon(unsigned int idx, Device *dev) {
     row = ICON_START_ROW + (idx % ICON_ROWS) * ICON_ROW_HEIGHT;
     col = ICON_START_COL + (idx / ICON_ROWS) * ICON_COL_WIDTH + 1;  // +1 for bracket space
 
-    // Select icon based on device type
-    if (dev->flags & DEVICE_CART) {
-        tl = CHAR_CART_TL; tr = CHAR_CART_TR;
-        bl = CHAR_CART_BL; br = CHAR_CART_BR;
-    } else if (dev->flags & DEVICE_HD) {
-        tl = CHAR_HD_TL; tr = CHAR_HD_TR;
-        bl = CHAR_HD_BL; br = CHAR_HD_BR;
-    } else if (dev->flags & DEVICE_RAMDISK) {
-        tl = CHAR_RAM_TL; tr = CHAR_RAM_TR;
-        bl = CHAR_RAM_BL; br = CHAR_RAM_BR;
-    } else {
-        // Default to floppy disk
-        tl = CHAR_DISK_TL; tr = CHAR_DISK_TR;
-        bl = CHAR_DISK_BL; br = CHAR_DISK_BR;
-    }
+    // Use stored icon (TL character), derive others from it
+    // Icons are stored as consecutive chars: TL, TR, BL, BR
+    tl = dev->icon;
+    tr = dev->icon + 1;
+    bl = dev->icon + 2;
+    br = dev->icon + 3;
 
     // Draw the 2x2 icon
     ui_draw_icon_2x2(row, col, tl, tr, bl, br);

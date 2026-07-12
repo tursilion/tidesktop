@@ -563,18 +563,7 @@ void viewer_show_bitmap(const char *path) {
 
     // Fill screen with sequential characters to display the image
     // Screen is 32x24, image is 256x192 (32x24 8x8 chars)
-    {
-        unsigned int row, pos;
-        unsigned char ch;
-
-        for (row = 0; row < 24; row++) {
-            VDP_SET_ADDRESS_WRITE(gImage + row * 32);
-            ch = row * 32;
-            for (pos = 0; pos < 32; pos++) {
-                VDPWD(ch++);
-            }
-        }
-    }
+    vdpwriteinc(gImage, 0, 768);
 
     // Wait for any key
     for (;;) {

@@ -12,7 +12,8 @@ extern unsigned int g_color_fg;       // Foreground (text) color
 extern unsigned int g_color_desktop;  // Desktop area color
 extern unsigned int g_color_icon;     // Icon color
 extern unsigned int g_color_select;   // Selection highlight color
-extern unsigned int g_color_title;    // Title bar accent color
+extern unsigned int g_color_title_bg; // Title bar accent color
+extern unsigned int g_color_title_fg; // Title bar text color
 extern unsigned int g_color_divider;  // Divider line color
 
 // Full ASCII font patterns (chars 32-126)
@@ -361,8 +362,6 @@ static const unsigned char icon_patterns[] = {
 #define NUM_TITLE_CHARS (sizeof(title_font_patterns) / 8)
 
 // Load custom character patterns and colors into VDP
-// be careful not to override the default colors set by main except where we need to
-// remember to use the configured colors in main
 void chars_init(void) {
     unsigned int i;
     unsigned int color_text;
@@ -370,8 +369,8 @@ void chars_init(void) {
 
     // Compute combined color bytes from globals
     color_text = (g_color_fg << 4) | g_color_desktop;
-    color_title_inset = (g_color_fg << 4) | g_color_title;
-
+    color_title_inset = (g_color_title_fg << 4) | g_color_title_bg;
+    
     // Load full ASCII font patterns (chars 32-126)
     vdpmemcpy(gPattern + (32 * 8), font_patterns, sizeof(font_patterns));
 
@@ -381,64 +380,68 @@ void chars_init(void) {
     // Load title bar mini-font (chars 168+)
     vdpmemcpy(gPattern + (FIRST_TITLE_FONT * 8), title_font_patterns, sizeof(title_font_patterns));
 
-    // main colors for fonts is already as desired, set our exceptions
+    // set colors
+    // 0-127   - default
+    // 128-143 - icon color
+    // 144-147 - title bar shapes
+    // 148     - divider
+    // 149-151 - window elements
+    // 152-159 - icon color
+    // 160-163 - selection bracket
+    // 164-167 - additional window elements
+    // 168-204 - title bar font
+    // 205-255 - default
 
     // DEL char 127: don't fuss with it - it's there if we need a scratch character pattern
+    
+    // default from 0-127
+    vdpmemset(gColor, (g_color_fg << 4) | g_color_desktop, 8*128);
 
     // Icons (chars 128-143): icon color on desktop
-    for (i = 128; i <= 143; i++) {
-        vdpmemset(gColor + (i * 8), (g_color_icon << 4) | g_color_desktop, 8);
-    }
+    vdpmemset(gColor + (128 * 8), (g_color_icon << 4) | g_color_desktop, 8*16);
 
     // Title bar shapes (chars 144-147): title color on desktop
-    for (i = 144; i <= 147; i++) {
-        vdpmemset(gColor + (i * 8), (g_color_title << 4) | g_color_desktop, 8);
-    }
+    vdpmemset(gColor + (144*8), (g_color_title_bg << 4) | g_color_desktop, 8*4);
 
     // Divider (char 148): subtle divider
     vdpmemset(gColor + (148 * 8), (g_color_divider << 4) | g_color_desktop, 8);
 
     // Window elements (chars 149-151): foreground on desktop
-    for (i = 149; i <= 151; i++) {
-        vdpmemset(gColor + (i * 8), color_text, 8);
-    }
+    vdpmemset(gColor + (149 * 8), color_text, 8*3);
 
     // File icons (chars 152-159): icon color on desktop
-    for (i = 152; i <= 159; i++) {
-        vdpmemset(gColor + (i * 8), (g_color_icon << 4) | g_color_desktop, 8);
-    }
-
+    vdpmemset(gColor + (152 * 8), (g_color_icon << 4) | g_color_desktop, 8*8);
+    
     // Selection brackets (chars 160-163): select color on desktop
-    for (i = 160; i <= 163; i++) {
-        vdpmemset(gColor + (i * 8), (g_color_select << 4) | g_color_desktop, 8);
-    }
+    vdpmemset(gColor + (160 * 8), (g_color_select << 4) | g_color_desktop, 8*4);
 
     // Additional window elements (chars 164-167): foreground on desktop
-    for (i = 164; i <= 167; i++) {
-        vdpmemset(gColor + (i * 8), color_text, 8);
-    }
+    vdpmemset(gColor + (164 * 8), color_text, 8*4);
 
     // Title bar mini-font (chars 168-204): special per-row colors
-    // Don't use transparent, choose all colors else it will look like a hole
-    // since the desktop color is not the same as the background screen color.
+    // these are defaults, actual colors are user defined
     // Rows 0-1: (dark blue top border)
     // Rows 2-5: (text on cyan)
     // Rows 6-7: (dark blue bottom border)
+    // Individually done since these are not solid color characters
     for (i = FIRST_TITLE_FONT; i < FIRST_TITLE_FONT + NUM_TITLE_CHARS; i++) {
         // Top 2 rows: desktop color (creates dark blue border)
         // use vdpchar to write a single byte, or better for a series, VDP_SET_ADDRESS_WRITE followed by VDPWD calls
         VDP_SET_ADDRESS_WRITE(gColor + (i * 8));
         VDPWD((g_color_desktop << 4) | g_color_desktop);
-        VDPWD((g_color_title << 4) | g_color_title);
+        VDPWD((g_color_title_bg << 4) | g_color_title_bg);
         // Middle 4 rows: text on title background
         VDPWD(color_title_inset);
         VDPWD(color_title_inset);
         VDPWD(color_title_inset);
         VDPWD(color_title_inset);
         // Bottom 2 rows: desktop color (creates dark blue border)
-        VDPWD((g_color_title << 4) | g_color_title);
+        VDPWD((g_color_title_bg << 4) | g_color_title_bg);
         VDPWD((g_color_desktop << 4) | g_color_desktop);
     }
+
+    // fill in the rest from 205-255
+    vdpmemset(gColor + (205*8), (g_color_fg << 4) | g_color_desktop, 8*51);
 }
 
 // Convert ASCII char to title bar mini-font char
