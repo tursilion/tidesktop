@@ -15,6 +15,9 @@ extern void ui_status(const char *msg);
 #define VIEW_PAB_ADDR   0x2800
 #define VIEW_BUF_ADDR   0x28C0
 
+// Bitmap viewer PAB address (separate from text viewer)
+#define BMP_PAB_ADDR    0x3800
+
 // Viewer window dimensions
 #define VIEW_X          0
 #define VIEW_Y          2
@@ -478,4 +481,107 @@ void viewer_view_file(const char *path, unsigned int is_variable, unsigned int r
     // Redraw desktop and windows
     ui_draw_desktop();
     window_redraw_all();
+}
+
+// Check if filename ends with _P (bitmap pattern file)
+// Returns 1 if it ends with _P, 0 otherwise
+unsigned int viewer_is_bitmap(const char *path) {
+    unsigned int len = 0;
+
+    // Find length
+    while (path[len]) len++;
+
+    // Check for _P suffix (need at least 2 chars)
+    if (len < 2) return 0;
+
+    return (path[len-2] == '_' && path[len-1] == 'P');
+}
+
+// Display a bitmap image (pattern file ending in _P)
+// Loads pattern to >0000, changes _P to _C and loads color to >2000
+// Sets restart_app flag when done since VDP is reconfigured
+void viewer_show_bitmap(const char *path) {
+    struct PAB pab;
+    unsigned char result;
+    char filename[PATH_MAX_LEN];
+    unsigned int i, len;
+    extern unsigned int restart_app;
+
+    // Copy filename
+    for (len = 0; path[len] && len < PATH_MAX_LEN - 1; len++) {
+        filename[len] = path[len];
+    }
+    filename[len] = 0;
+
+    // Set up normal bitmap mode (not the half-mode desktop uses)
+    set_bitmap(VDP_SPR_8x8);
+
+    // Clear screen
+    vdpmemset(gImage, 0, 768);
+
+    // Set up PAB for LOAD - pattern data
+    pab.OpCode = DSR_LOAD;
+    pab.Status = 0;
+    pab.VDPBuffer = 0x0000;         // Pattern table at >0000
+    pab.RecordLength = 0;
+    pab.CharCount = 0;
+    pab.RecordNumber = 6144;        // Max bytes to load
+    pab.ScreenOffset = 0;
+    pab.NameLength = 0;
+    pab.pName = (unsigned char *)filename;
+
+    // Load pattern data
+    result = dsrlnk(&pab, BMP_PAB_ADDR);
+    if (result != 0) {
+        // Pattern load failed - can't display anything useful
+        // Fill with a simple pattern so user sees something
+        vdpmemset(0x0000, 0xAA, 6144);
+    }
+
+    // Change _P to _C for color file
+    if (len >= 2) {
+        filename[len-1] = 'C';
+    }
+
+    // Set up PAB for LOAD - color data
+    pab.OpCode = DSR_LOAD;
+    pab.Status = 0;
+    pab.VDPBuffer = 0x2000;         // Color table at >2000
+    pab.RecordLength = 0;
+    pab.CharCount = 0;
+    pab.RecordNumber = 6144;        // Max bytes to load
+    pab.ScreenOffset = 0;
+    pab.NameLength = 0;
+    pab.pName = (unsigned char *)filename;
+
+    // Load color data
+    result = dsrlnk(&pab, BMP_PAB_ADDR);
+    if (result != 0) {
+        // Color load failed - use default colors (black on grey)
+        vdpmemset(0x2000, 0x1E, 6144);
+    }
+
+    // Fill screen with sequential characters to display the image
+    // Screen is 32x24, image is 256x192 (32x24 8x8 chars)
+    {
+        unsigned int row, pos;
+        unsigned char ch;
+
+        for (row = 0; row < 24; row++) {
+            VDP_SET_ADDRESS_WRITE(gImage + row * 32);
+            ch = row * 32;
+            for (pos = 0; pos < 32; pos++) {
+                VDPWD(ch++);
+            }
+        }
+    }
+
+    // Wait for any key
+    for (;;) {
+        kscan(KSCAN_MODE_BASIC);
+        if (KSCAN_KEY != KSCAN_NOKEY) break;
+    }
+
+    // VDP is completely reconfigured - need full restart
+    restart_app = 1;
 }

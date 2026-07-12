@@ -11,6 +11,7 @@ extern void input_process(void);
 extern void chars_init(void);
 extern void window_init(void);
 extern void clock_update_display(void);
+extern void input_restore_selection(void);
 
 // Global application state
 AppState g_app;
@@ -104,17 +105,27 @@ int main(void) {
         // Initialize VDP
         vdp_init();
 
-        // Initialize application state
-        app_init();
-
-        // Initialize window system
-        window_init();
+        // Initialize application state (only on first run, not restart)
+        // On restart we want to keep all installed devices and window state
+        if (!restart_app) {
+            app_init();
+            window_init();
+        } else {
+            // Reset non-device state
+            g_app.menu_active = 0;
+            // Window state is preserved - scroll positions, cursor, files, etc.
+        }
 
         // Initialize UI
         ui_init();
 
         // Draw initial desktop
         ui_draw_desktop();
+
+        // On restart, restore selection reticule and redraw active windows
+        if (restart_app) {
+            input_restore_selection();
+        }
 
         // clear the restart flag
         restart_app = 0;

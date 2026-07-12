@@ -38,11 +38,18 @@ extern void ea5ld(char *filename);
 // Forward declaration for text file viewer
 extern void viewer_view_file(const char *path, unsigned int is_variable, unsigned int rec_len);
 
+// Forward declarations for bitmap viewer
+extern unsigned int viewer_is_bitmap(const char *path);
+extern void viewer_show_bitmap(const char *path);
+
 // Forward declaration for local function
 static void input_update_focus_status(void);
 
 // restart attempt if EA5 fails from main.c
 extern unsigned int restart_app;
+
+// Restore selection display after restart (called from main.c)
+void input_restore_selection(void);  // forward declaration
 
 // Currently selected device on desktop (-1 = none selected)
 static int g_selected = -1;
@@ -55,6 +62,20 @@ static unsigned int g_repeat_count = 0;
 // Key repeat timing (in frames at 60Hz)
 #define KEY_REPEAT_INITIAL  20   // ~333ms initial delay
 #define KEY_REPEAT_FAST     4    // ~67ms repeat rate
+
+// Restore selection display after restart
+// Called from main.c when VDP has been restored
+void input_restore_selection(void) {
+    extern void window_redraw_all(void);
+
+    // Redraw selection reticule if there was one
+    if (g_has_selection && g_selected >= 0 && (unsigned int)g_selected < g_app.device_count) {
+        ui_select_device(g_selected, 1);
+    }
+
+    // Redraw any active windows
+    window_redraw_all();
+}
 
 // Handle device selection (1-9 keys)
 static void input_select_device(int num) {
@@ -227,6 +248,13 @@ static void input_open(void) {
                     fullpath[pos++] = file->name[i];
                 }
                 fullpath[pos] = 0;
+
+                // Check if this is a bitmap image (filename ends with _P)
+                if (viewer_is_bitmap(fullpath)) {
+                    viewer_show_bitmap(fullpath);
+                    // viewer_show_bitmap sets restart_app
+                    return;
+                }
 
                 ui_status("Loading...");
                 // This does not return on success
