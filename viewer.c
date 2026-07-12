@@ -37,7 +37,7 @@ extern void ui_status(const char *msg);
     unsigned int at_eof;            // Reached end of file
     unsigned int rec_count;         // Number of records in buffer
     unsigned int rec_lengths[VIEW_ROWS]; // Actual length of each record (in VDP)
-    char filename[128];              // Full path to file
+    char filename[PATH_MAX_LEN];     // Full path to file
 } g_viewer;
 
 static void viewer_close_file(void);

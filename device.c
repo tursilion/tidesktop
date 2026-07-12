@@ -412,7 +412,7 @@ static unsigned int disk_read_dir_path(Device *dev, const char *path, char *volu
     unsigned int i;
     int ftype;
     unsigned int offset;
-    char dir_name[80];  // Longer to accommodate path
+    char dir_name[PATH_MAX_LEN];  // Device.path (e.g., "DSK1.SUBDIR.")
     unsigned int char_count;
     unsigned int pos;
 

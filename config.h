@@ -50,8 +50,9 @@
 #define FILE_COL_SIZE   0       // Size column start
 #define FILE_COL_TYPE   5       // Type column start (after "999K ")
 #define FILE_COL_NAME   11      // Name column start (after "DV128 ")
-#define FILE_NAME_LEN   32      // Max filename length
+#define FILE_NAME_LEN   32      // Max filename length (display)
 #define FILE_LINE_LEN   43      // Total line length
+#define PATH_MAX_LEN    128     // Max internal path/filename buffer size
 
 // Window positions (Y is row 2, below title bar and divider)
 #define WIN1_X          16      // Right half (dual window mode)

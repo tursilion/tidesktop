@@ -49,7 +49,7 @@ typedef struct {
     unsigned int page_start;    // Starting file index for current page
     Device *device;             // Device this window shows
     char volume_name[12];       // Disk volume name (max 10 chars + null)
-    char path[128];             // Current subdirectory path (e.g., "SUBDIR.NESTED.")
+    char path[PATH_MAX_LEN];    // Current subdirectory path (e.g., "SUBDIR.NESTED.")
     FileEntry files[WIN_MAX_FILES];  // File entries for this window
 } Window;
 
