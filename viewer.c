@@ -1,3 +1,6 @@
+// TODO: DF128 failed to open (tried to open it as DF80)
+// libti99all is not returning DSR errors, or we aren't seeing them
+
 // viewer.c - TI-99/4A Desktop Environment Text File Viewer
 #include "config.h"
 #include "types.h"
@@ -135,20 +138,11 @@ static void prepare_pab(struct PAB *ppab) {
     ppab->pName = (unsigned char *)g_viewer.filename;
 }
 
-// Open a file for viewing
-// Returns 1 on success, 0 on failure
-static unsigned int viewer_open_file(const char *path, unsigned int is_variable, unsigned int rec_len) {
+// opens the file after the global structure has been setup, so we can re-open
+// if EOF happens.
+static unsigned int viewer_reopen_file() {
     struct PAB pab;
     unsigned char result;
-    unsigned int i;
-    unsigned int path_len;
-
-    // Copy filename
-    for (path_len = 0; path[path_len] && path_len < 127; path_len++) {
-        g_viewer.filename[path_len] = path[path_len];
-    }
-    g_viewer.filename[path_len] = 0;
-    g_viewer.is_variable = is_variable;
 
     prepare_pab(&pab);
     
@@ -179,6 +173,24 @@ static unsigned int viewer_open_file(const char *path, unsigned int is_variable,
     return 1;
 }
 
+// Open a file for viewing
+// Returns 1 on success, 0 on failure
+static unsigned int viewer_open_file(const char *path, unsigned int is_variable, unsigned int rec_len) {
+    struct PAB pab;
+    unsigned char result;
+    unsigned int i;
+    unsigned int path_len;
+
+    // Copy filename
+    for (path_len = 0; path[path_len] && path_len < 127; path_len++) {
+        g_viewer.filename[path_len] = path[path_len];
+    }
+    g_viewer.filename[path_len] = 0;
+    g_viewer.is_variable = is_variable;
+    
+    return viewer_reopen_file();
+}
+
 // Close the current file
 static void viewer_close_file(void) {
     struct PAB pab;
@@ -205,7 +217,17 @@ static unsigned int viewer_read_page(unsigned int record_num) {
     unsigned int copy_len;
     char lclbuf[256];
 
-    if (!g_viewer.is_open) return 0;
+    if (!g_viewer.is_open) {
+        if (g_viewer.at_eof) {
+            // if we ran off the end of the file, just re-open it
+            if (!viewer_reopen_file()) {
+                return 0;
+            }
+        } else {
+            // some other condition
+            return 0;
+        }
+    }
     
     prepare_pab(&pab);
 
@@ -229,9 +251,12 @@ static unsigned int viewer_read_page(unsigned int record_num) {
                 result = dsrlnk(&pab, VIEW_PAB_ADDR);
                 if (result != 0) {
                     // Error or EOF while skipping
+                    // disk errors on the TI close the file
+                    // note that we probably read some of it!
                     g_viewer.at_eof = 1;
-                    g_viewer.rec_count = 0;
-                    return 0;
+                    g_viewer.is_open = 0;
+                    g_viewer.rec_count = i-1;
+                    return 1;
                 }
             }
         }
@@ -414,14 +439,14 @@ void viewer_view_file(const char *path, unsigned int is_variable, unsigned int r
                 unsigned int max_len = (g_viewer.rec_len > VIEW_REC_SIZE) ? VIEW_REC_SIZE : g_viewer.rec_len;
                 unsigned int max_scroll = (max_len > VIEW_W - 2) ? (max_len - (VIEW_W - 2)) : 0;
                 int newscroll;
-                if (g_viewer.scroll_x == max_scroll-1) {
+                if (g_viewer.scroll_x == max_scroll) {
                     newscroll = 0;
                 } else {
                     newscroll = g_viewer.scroll_x+20;
                 }
                 
-                if (newscroll >= max_scroll) {
-                    newscroll = max_scroll-1;
+                if (newscroll > max_scroll) {
+                    newscroll = max_scroll;
                 }
                 if (g_viewer.scroll_x != newscroll) {
                     g_viewer.scroll_x = newscroll;
