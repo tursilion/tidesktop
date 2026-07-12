@@ -3,14 +3,19 @@
 #define CONFIG_H
 
 // VDP Memory Layout (Graphics I Mode)
-#define VDP_PDT         0x0000  // Pattern Descriptor Table (2KB)
-#define VDP_SIT         0x0800  // Screen Image Table (768 bytes)
-#define VDP_SAL         0x0B00  // Sprite Attribute List (128 bytes)
-#define VDP_CT          0x0380  // Color Table (32 bytes in GR1)
-#define VDP_SDT         0x1000  // Sprite Descriptor Table (2KB)
-#define VDP_PAB         0x1800  // PAB area for file ops (2KB)
-#define VDP_FILEBUF     0x1900  // File data buffer
-#define VDP_DIRBUF      0x2000  // Directory cache (8KB available)
+// 0000 PDT (0x800 bytes)
+// 0800 
+// 1800 SIT (0x300 bytes) and SDT (0x800 bytes, overlapping)
+// 1B00 SAL (0x80 bytes)
+// 1B80
+// 2000 CT  (0x800 bytes)
+// 2800 CLOCK_PAB_ADDR
+// 2820 CLOCK_BUF_ADDR (max 96 bytes)
+// 2880 DIR_PAB_ADDR/VIEW_PAB_ADDR
+// 28C0 DIR_BUF_ADDR/VIEW_BUF_ADDR (max 256 bytes)
+// 29C0 Viewer buffer (may be resused when viewer not active - 18 rows * 128 bytes)
+// 32C0
+// 37D0 RESERVED FOR DISK INCLUDING CF7
 
 // Screen dimensions (Graphics I)
 #define SCREEN_WIDTH    32

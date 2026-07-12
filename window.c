@@ -6,11 +6,20 @@
 // External UI functions
 extern void ui_status(const char *msg);
 
+// Forward declarations
+static void window_draw_frame(Window *win, const char *title);
+static void window_draw_content(Window *win);
+void window_show(Window *win);
+
+// Forward declarations from device.c
+extern unsigned int device_read_dir(Device *dev, FileEntry *files, unsigned int max_files, unsigned int page);
+extern unsigned int device_read_dir_with_path(Device *dev, const char *path, char *volume_name, FileEntry *files, unsigned int max_files, unsigned int page);
+
 // Global default scroll position (remembered across windows)
 static unsigned int g_default_scroll_x = FILE_COL_NAME;
 
 // Type prefix strings (2 chars each) - used with record length
-// PROG, GROM, ROM have no record length, others are XX + nnn format
+// PROG, GROM, ROM, DIR have no record length, others are XX + nnn format
 static const char *type_prefix[] = {
     "PROG",   // FILE_TYPE_PROGRAM (special case - no rec len)
     "IF",     // FILE_TYPE_INTFIX
@@ -18,7 +27,8 @@ static const char *type_prefix[] = {
     "DF",     // FILE_TYPE_DISFIX
     "DV",     // FILE_TYPE_DISVAR
     "GROM",   // FILE_TYPE_GROM (special case - no rec len)
-    "ROM "    // FILE_TYPE_ROM (special case - no rec len)
+    "ROM ",   // FILE_TYPE_ROM (special case - no rec len)
+    "DIR "    // FILE_TYPE_DIR (special case - no rec len)
 };
 
 // Initialize window system
@@ -37,6 +47,8 @@ void window_init(void) {
         g_app.windows[i].scroll_y = 0;
         g_app.windows[i].cursor_y = 0;
         g_app.windows[i].page_start = 0;
+        g_app.windows[i].volume_name[0] = 0;
+        g_app.windows[i].path[0] = 0;
     }
 
     // Set window positions
@@ -171,8 +183,8 @@ static void format_file_line(FileEntry *file, char *line) {
     // Space
     line[4] = ' ';
 
-    // Type (5 chars): "PROG ", "GROM ", "ROM  " or "XXnnn" where XX is type prefix and nnn is rec_len
-    prefix = (file->type <= FILE_TYPE_ROM) ? type_prefix[file->type] : "??";
+    // Type (5 chars): "PROG ", "GROM ", "ROM  ", "DIR  " or "XXnnn" where XX is type prefix and nnn is rec_len
+    prefix = (file->type <= FILE_TYPE_DIR) ? type_prefix[file->type] : "??";
 
     if (file->type == FILE_TYPE_PROGRAM) {
         // Program files: "PROG "
@@ -193,6 +205,13 @@ static void format_file_line(FileEntry *file, char *line) {
         line[5] = 'R';
         line[6] = 'O';
         line[7] = 'M';
+        line[8] = ' ';
+        line[9] = ' ';
+    } else if (file->type == FILE_TYPE_DIR) {
+        // Subdirectory: "DIR  "
+        line[5] = 'D';
+        line[6] = 'I';
+        line[7] = 'R';
         line[8] = ' ';
         line[9] = ' ';
     } else {
@@ -337,6 +356,8 @@ int window_open(Device *dev) {
     win->cursor_y = 0;
     win->file_count = 0;
     win->page_start = 0;
+    win->volume_name[0] = 0;
+    win->path[0] = 0;  // Start at device root
 
     // Set window size based on whether this is the only window
     if (g_app.win_count == 0) {
@@ -344,21 +365,40 @@ int window_open(Device *dev) {
         window_set_expanded(win);
     } else {
         // Second window opening - shrink the other window to half
-        if (win_idx == 0) {
-            window_set_half(1);  // Shrink window 1 (left)
-        } else {
-            window_set_half(0);  // Shrink window 0 (right)
+        unsigned int other_idx = (win_idx == 0) ? 1 : 0;
+        window_set_half(other_idx);
+        window_set_half(win_idx);
+
+        // Redraw desktop to clear area, then redraw the other window
+        {
+            extern void ui_draw_desktop(void);
+            ui_draw_desktop();
+            window_show(&g_app.windows[other_idx]);
         }
-        window_set_half(win_idx);  // New window is also half
     }
 
     g_app.win_count++;
 
-    // Build window title from device name
+    // Load directory first (this also reads the volume name into the window)
+    {
+        unsigned int visible_rows = win->h - 2;
+        win->file_count = device_read_dir_with_path(dev, win->path, win->volume_name, win->files, visible_rows, 0);
+    }
+
+    // Build window title - use volume name if available, else device name
     {
         unsigned int i;
-        for (i = 0; i < 11 && dev->name[i]; i++) {
-            title[i] = dev->name[i];
+        const char *src;
+
+        // Use volume name if it's not blank
+        if (win->volume_name[0] != 0 && win->volume_name[0] != ' ') {
+            src = win->volume_name;
+        } else {
+            src = dev->name;
+        }
+
+        for (i = 0; i < 10 && src[i] && src[i] != ' '; i++) {
+            title[i] = src[i];
         }
         title[i] = 0;
     }
@@ -366,7 +406,7 @@ int window_open(Device *dev) {
     // Draw window frame
     window_draw_frame(win, title);
 
-    // Draw empty content for now
+    // Draw content (already loaded)
     window_draw_content(win);
 
     // Focus the new window
@@ -522,21 +562,24 @@ void window_hide(Window *win) {
 // Show the window (redraw fully)
 void window_show(Window *win) {
     char title[12];
-    Device *dev;
+    const char *src;
     unsigned int i;
 
     if (!win || !win->active) return;
 
-    dev = win->device;
-    if (dev) {
-        for (i = 0; i < 11 && dev->name[i]; i++) {
-            title[i] = dev->name[i];
-        }
-        title[i] = 0;
+    // Use volume name if available, else device name
+    if (win->volume_name[0] != 0 && win->volume_name[0] != ' ') {
+        src = win->volume_name;
+    } else if (win->device) {
+        src = win->device->name;
     } else {
-        title[0] = '?';
-        title[1] = 0;
+        src = "?";
     }
+
+    for (i = 0; i < 10 && src[i] && src[i] != ' '; i++) {
+        title[i] = src[i];
+    }
+    title[i] = 0;
 
     window_draw_frame(win, title);
     window_draw_content(win);
@@ -613,9 +656,6 @@ void window_cursor_down(Window *win) {
     }
 }
 
-// Forward declaration from device.c
-extern unsigned int device_read_dir(Device *dev, FileEntry *files, unsigned int max_files, unsigned int page);
-
 // Load directory entries into window from device
 void window_load_dir(Window *win, unsigned int page) {
     unsigned int visible_rows;
@@ -628,11 +668,80 @@ void window_load_dir(Window *win, unsigned int page) {
     win->cursor_y = 0;
     win->page_start = page;
 
-    // Read directory from device (request only visible rows)
-    win->file_count = device_read_dir(win->device, win->files, visible_rows, page);
+    // Read directory from device with path (request only visible rows)
+    // Pass NULL for volume_name since we already have it from initial open
+    win->file_count = device_read_dir_with_path(win->device, win->path, 0, win->files, visible_rows, page);
 
     // Redraw content
     window_draw_content(win);
+}
+
+// Enter a subdirectory - appends dir name to path and reloads
+// Returns 1 if entered, 0 if not a directory
+unsigned int window_enter_subdir(Window *win) {
+    FileEntry *file;
+    unsigned int i;
+    unsigned int path_len;
+
+    if (!win || !win->active || win->cursor_y >= win->file_count) return 0;
+
+    file = &win->files[win->cursor_y];
+
+    // Only enter if it's a directory
+    if (file->type != FILE_TYPE_DIR) return 0;
+
+    // Find current path length
+    for (path_len = 0; win->path[path_len]; path_len++);
+
+    // Append directory name to path (with trailing dot)
+    for (i = 0; file->name[i] && path_len < 126; i++) {
+        win->path[path_len++] = file->name[i];
+    }
+    win->path[path_len++] = '.';
+    win->path[path_len] = 0;
+
+    // Reset to page 0 and reload
+    win->page_start = 0;
+    win->cursor_y = 0;
+    window_load_dir(win, 0);
+
+    return 1;
+}
+
+// Show the current path on the status bar
+// Format: "DEV.PATH" or just "DEV." if at root
+void window_show_path(Window *win) {
+    char buf[32];
+    unsigned int i, pos;
+    Device *dev;
+
+    if (!win || !win->active || !win->device) {
+        ui_status("Desktop");
+        return;
+    }
+
+    dev = win->device;
+    pos = 0;
+
+    // Copy device name
+    for (i = 0; dev->name[i] && pos < 8; i++) {
+        buf[pos++] = dev->name[i];
+    }
+    buf[pos++] = '.';
+
+    // Append path (truncate if too long for status bar)
+    for (i = 0; win->path[i] && pos < 30; i++) {
+        buf[pos++] = win->path[i];
+    }
+
+    // If path was truncated, show ellipsis
+    if (win->path[i]) {
+        buf[pos - 1] = '.';
+        buf[pos - 2] = '.';
+    }
+
+    buf[pos] = 0;
+    ui_status(buf);
 }
 
 // Page up (previous page of files)
@@ -663,23 +772,27 @@ void window_redraw_all(void) {
     unsigned int i;
     char title[12];
     Window *win;
-    Device *dev;
+    const char *src;
 
     for (i = 0; i < MAX_WINDOWS; i++) {
         win = &g_app.windows[i];
         if (!win->active) continue;
 
-        dev = win->device;
+        // Build title - use volume name if available, else device name
+        if (win->volume_name[0] != 0 && win->volume_name[0] != ' ') {
+            src = win->volume_name;
+        } else if (win->device) {
+            src = win->device->name;
+        } else {
+            src = "?";
+        }
 
-        // Build title from device name
-        if (dev) {
+        {
             unsigned int j;
-            for (j = 0; j < 11 && dev->name[j]; j++) {
-                title[j] = dev->name[j];
+            for (j = 0; j < 10 && src[j] && src[j] != ' '; j++) {
+                title[j] = src[j];
             }
             title[j] = 0;
-        } else {
-            title[0] = '?'; title[1] = 0;
         }
 
         window_draw_frame(win, title);

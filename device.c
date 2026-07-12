@@ -47,6 +47,45 @@ static const unsigned int cru_scan_list[] = {
     0
 };
 
+// PAB addresses for DSR operations
+#define CLOCK_PAB_ADDR  0x2800
+#define CLOCK_BUF_ADDR  0x2820
+#define DIR_PAB_ADDR    0x2880
+#define DIR_BUF_ADDR    0x28C0
+
+// Convert TI radix-100 floating point to integer
+// TI format: byte 0 = exponent (biased by 64, radix 100)
+//            bytes 1-7 = mantissa (radix 100 digits)
+// Negative numbers have bit 7 set in mantissa byte 1
+static int ti_float_to_int(unsigned char *fp) {
+    int exp;
+    int result;
+    int negative;
+    unsigned char digit;
+    int i;
+
+    // Check for zero (exponent byte 0)
+    if (fp[0] == 0) return 0;
+
+    // Extract exponent (radix 100, biased by 64)
+    exp = (fp[0] & 0x7F) - 64;
+
+    // Check for negative (high bit of mantissa byte 1)
+    negative = (fp[1] & 0x80) ? 1 : 0;
+
+    // If exponent is negative, value is < 1
+    if (exp < 0) return 0;
+
+    // Build the integer from mantissa digits
+    result = 0;
+    for (i = 1; i <= 7 && exp >= 0; i++, exp--) {
+        digit = fp[i] & 0x7F;  // Remove sign bit if present
+        result = result * 100 + digit;
+    }
+
+    return negative ? -result : result;
+}
+
 // GROM addresses to scan for cartridge headers
 // Console GROMs first (always present), then cartridge area
 // We omit 0000 for two reasons. First, there's no programs there.
@@ -286,8 +325,6 @@ static unsigned int cart_scan_port(
     unsigned int i;
     unsigned int addr, list_addr;
     
-    //__asm volatile( "data 0x0113" );    // classic99 breakpoint
-
     for (i = start_addr_idx; grom_scan_addrs[i] != 0; i++) {
         addr = grom_scan_addrs[i];
         if (cart_check_grom_header(addr, port)) {
@@ -359,6 +396,196 @@ unsigned int cart_read_dir(FileEntry *files, unsigned int max_files, unsigned in
 // max_files: maximum entries to return
 // page: 0-based page number
 // Returns number of entries added
+// Read a disk directory using DSR
+// path: optional subdirectory path (e.g., "SUBDIR." or "DIR1.DIR2.")
+// volume_name: optional buffer to receive volume name (12 bytes min, or NULL)
+// Returns number of file entries read
+static unsigned int disk_read_dir_path(Device *dev, const char *path, char *volume_name, FileEntry *files, unsigned int max_files, unsigned int page) {
+    struct PAB pab;
+    unsigned char result;
+    unsigned char data[256];
+    unsigned int count;
+    unsigned int record_num;
+    unsigned int skip_count;
+    unsigned int lfn_mode;
+    unsigned int name_len;
+    unsigned int i;
+    int ftype;
+    unsigned int offset;
+    char dir_name[80];  // Longer to accommodate path
+    unsigned int char_count;
+    unsigned int pos;
+
+    if (!dev) return 0;
+
+    // Clear volume name if provided
+    if (volume_name) {
+        volume_name[0] = 0;
+    }
+
+    // Build directory name: "DEV.PATH" (e.g., "DSK1.SUBDIR.")
+    pos = 0;
+    for (i = 0; i < 7 && dev->name[i]; i++) {
+        dir_name[pos++] = dev->name[i];
+    }
+    dir_name[pos++] = '.';
+
+    // Append path if provided
+    if (path) {
+        for (i = 0; path[i] && pos < 78; i++) {
+            dir_name[pos++] = path[i];
+        }
+    }
+    dir_name[pos] = 0;
+    i = pos;  // Set i for pab.NameLength
+
+    // Try opening as Long Filename mode first (Internal Variable, length 0)
+    pab.OpCode = DSR_OPEN;
+    pab.Status = DSR_TYPE_VARIABLE | DSR_TYPE_INTERNAL | DSR_TYPE_INPUT;
+    pab.VDPBuffer = DIR_BUF_ADDR;
+    pab.RecordLength = 0;  // Auto-detect (LFN mode)
+    pab.CharCount = 0;
+    pab.RecordNumber = 0;
+    pab.ScreenOffset = 0;
+    pab.NameLength = i;
+    pab.pName = (unsigned char *)dir_name;
+
+    result = dsrlnk(&pab, DIR_PAB_ADDR);
+    if (result != 0) {
+        // LFN failed, try short filename mode (Internal Fixed 38)
+        pab.OpCode = DSR_OPEN;
+        pab.Status = DSR_TYPE_INTERNAL | DSR_TYPE_INPUT;
+        pab.RecordLength = 38;
+        pab.RecordNumber = 0;
+
+        result = dsrlnk(&pab, DIR_PAB_ADDR);
+        if (result != 0) {
+            // Neither mode works - device doesn't support directories
+            return 0;
+        }
+        lfn_mode = 0;
+    } else {
+        lfn_mode = 1;
+        // Read back record length from VDP
+        pab.RecordLength = vdpreadchar(DIR_PAB_ADDR + 4);
+    }
+
+    // Calculate which records to skip for this page
+    skip_count = page * max_files;
+    record_num = 0;  // Start at record 0 (disk info)
+    count = 0;
+
+    // For short filename mode, we can jump directly to the record
+    if (!lfn_mode && skip_count > 0) {
+        record_num = skip_count + 1;  // +1 to skip disk info record
+        skip_count = 0;
+    }
+
+    // Read directory entries
+    while (count < max_files) {
+        // Set up PAB for READ
+        pab.OpCode = DSR_READ;
+        pab.CharCount = 0;
+        if (!lfn_mode) {
+            pab.RecordNumber = record_num;
+        }
+
+        result = dsrlnk(&pab, DIR_PAB_ADDR);
+        if (result != 0) {
+            // End of directory or error
+            break;
+        }
+
+        // Read back CharCount from VDP
+        char_count = vdpreadchar(DIR_PAB_ADDR + 5);
+        if (char_count == 0 || char_count > sizeof(data)) {
+            break;
+        }
+
+        // Read data from VDP buffer
+        vdpmemread(DIR_BUF_ADDR, data, char_count);
+
+        // Parse the record
+        name_len = data[0];
+        if (name_len == 0 || name_len > 32) {
+            break;  // Invalid or end of directory
+        }
+
+        // Offset to first float (after name)
+        offset = 1 + name_len;
+
+        // Check if we have enough data for the three floats
+        // Each float is: 1 byte length + 8 bytes data = 9 bytes, times 3 = 27
+        if (offset + 27 > char_count) {
+            break;  // Incomplete record
+        }
+
+        // Get file type from first float (skip length byte)
+        ftype = ti_float_to_int(&data[offset + 1]);
+
+        // Record 0 is disk info - extract volume name, then skip
+        if (record_num == 0) {
+            // Volume name is in the name field (max 10 chars)
+            if (volume_name) {
+                unsigned int vol_len = (name_len > 10) ? 10 : name_len;
+                for (i = 0; i < vol_len; i++) {
+                    volume_name[i] = data[1 + i];
+                }
+                volume_name[vol_len] = 0;
+            }
+            record_num++;
+            continue;
+        }
+
+        // Check for end of directory (type 0)
+        if (ftype == 0) {
+            break;
+        }
+
+        // Skip entries until we reach our page
+        if (skip_count > 0) {
+            skip_count--;
+            record_num++;
+            continue;
+        }
+
+        // Copy filename
+        for (i = 0; i < name_len && i < 31; i++) {
+            files[count].name[i] = data[1 + i];
+        }
+        files[count].name[i] = 0;
+
+        // Convert TI file type to our type
+        // TI: 1=DIS/FIX, 2=DIS/VAR, 3=INT/FIX, 4=INT/VAR, 5=PROGRAM, 6=DIR
+        // Negative = protected
+        if (ftype < 0) ftype = -ftype;  // Ignore protection for now
+        switch (ftype) {
+            case 1: files[count].type = FILE_TYPE_DISFIX; break;
+            case 2: files[count].type = FILE_TYPE_DISVAR; break;
+            case 3: files[count].type = FILE_TYPE_INTFIX; break;
+            case 4: files[count].type = FILE_TYPE_INTVAR; break;
+            case 5: files[count].type = FILE_TYPE_PROGRAM; break;
+            case 6: files[count].type = FILE_TYPE_DIR; break;
+            default: files[count].type = FILE_TYPE_DISFIX; break;
+        }
+
+        // Get size from second float (offset + 9 for first float, +1 for len byte)
+        files[count].size = ti_float_to_int(&data[offset + 10]);
+
+        // Get record length from third float (offset + 18, +1 for len byte)
+        files[count].rec_len = ti_float_to_int(&data[offset + 19]);
+
+        count++;
+        record_num++;
+    }
+
+    // Close the directory
+    pab.OpCode = DSR_CLOSE;
+    dsrlnk(&pab, DIR_PAB_ADDR);
+
+    return count;
+}
+
 unsigned int device_read_dir(Device *dev, FileEntry *files, unsigned int max_files, unsigned int page) {
     if (!dev) return 0;
 
@@ -366,9 +593,21 @@ unsigned int device_read_dir(Device *dev, FileEntry *files, unsigned int max_fil
         return cart_read_dir(files, max_files, page);
     }
 
-    // TODO: Implement disk directory reading
-    // For now, return 0 entries
-    return 0;
+    // Read disk directory via DSR (no path, no volume name)
+    return disk_read_dir_path(dev, 0, 0, files, max_files, page);
+}
+
+// Read directory with subdirectory path and optional volume name output
+unsigned int device_read_dir_with_path(Device *dev, const char *path, char *volume_name, FileEntry *files, unsigned int max_files, unsigned int page) {
+    if (!dev) return 0;
+
+    if (dev->flags & DEVICE_CART) {
+        if (volume_name) volume_name[0] = 0;
+        return cart_read_dir(files, max_files, page);
+    }
+
+    // Read disk directory via DSR with path
+    return disk_read_dir_path(dev, path, volume_name, files, max_files, page);
 }
 
 // Enable a DSR card at CRU base
@@ -760,6 +999,10 @@ void device_scan(void) {
     // Redraw desktop with new devices
     ui_draw_desktop();
 
+    // Redraw any active windows (selection dialog may have overlapped)
+    extern void window_redraw_all(void);
+    window_redraw_all();
+
     // If clock was newly found, update display immediately
     if (g_clock_available && !clock_was_set) {
         clock_update_display();
@@ -877,11 +1120,6 @@ void cart_launch_grom(unsigned int entry_addr, unsigned int port) {
 // ============================================================================
 // Clock (RTC) Support
 // ============================================================================
-
-// PAB address for clock operations (use safe area at >2800)
-// Normal TI disk system reduces VDP from top (>37D7), so avoid high addresses
-#define CLOCK_PAB_ADDR  0x2800
-#define CLOCK_BUF_ADDR  0x2820
 
 // Clock device name
 static const char clock_name[] = "CLOCK";

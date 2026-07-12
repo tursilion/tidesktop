@@ -24,11 +24,19 @@ extern void window_get_title(Window *win, char *buf);
 extern void window_load_dir(Window *win, unsigned int page);
 extern void window_draw_indicator(void);
 extern void window_show(Window *win);
+extern unsigned int window_enter_subdir(Window *win);
+extern void window_show_path(Window *win);
 
 // Forward declarations from device.c
 extern unsigned int device_read_dir(Device *dev, FileEntry *files, unsigned int max_files, unsigned int page);
 extern void cart_launch_rom(unsigned int entry_addr);
 extern void cart_launch_grom(unsigned int entry_addr, unsigned int port);
+
+// Forward declaration for EA5 loader (scratchloaderDesktop.asm)
+extern void ea5ld(char *filename);
+
+// Forward declaration for text file viewer
+extern void viewer_view_file(const char *path, unsigned int is_variable, unsigned int rec_len);
 
 // Forward declaration for local function
 static void input_update_focus_status(void);
@@ -183,7 +191,46 @@ static void input_open(void) {
         if (win && win->file_count > 0 && win->cursor_y < win->file_count) {
             FileEntry *file = &win->files[win->cursor_y];
 
-            if (file->type == FILE_TYPE_ROM) {
+            if (file->type == FILE_TYPE_DIR) {
+                // Enter subdirectory
+                if (window_enter_subdir(win)) {
+                    extern void window_redraw_all(void);
+                    window_redraw_all();
+                    input_update_focus_status();  // Show new path
+                }
+            } else if (file->type == FILE_TYPE_PROGRAM) {
+                // Load and run PROGRAM file from disk
+                // Build full path: "DEVICE.PATH.FILENAME"
+                char fullpath[160];
+                unsigned int pos = 0;
+                unsigned int i;
+                Device *dev = win->device;
+
+                // Copy device name
+                if (dev) {
+                    for (i = 0; dev->name[i] && pos < 8; i++) {
+                        fullpath[pos++] = dev->name[i];
+                    }
+                }
+                fullpath[pos++] = '.';
+
+                // Copy path (already has trailing dots between subdirs)
+                for (i = 0; win->path[i] && pos < 140; i++) {
+                    fullpath[pos++] = win->path[i];
+                }
+
+                // Copy filename
+                for (i = 0; file->name[i] && pos < 158; i++) {
+                    fullpath[pos++] = file->name[i];
+                }
+                fullpath[pos] = 0;
+
+                ui_status("Loading...");
+                // This does not return on success
+                ea5ld(fullpath);
+                // If we get here, load failed
+                ui_status("Load failed");
+            } else if (file->type == FILE_TYPE_ROM) {
                 // Launch ROM program - branch to entry address
                 // This does not return
                 cart_launch_rom(file->size);
@@ -192,9 +239,43 @@ static void input_open(void) {
                 // entry_addr in size, port in rec_len
                 // This does not return
                 cart_launch_grom(file->size, file->rec_len);
+            } else if (file->type == FILE_TYPE_DISFIX || file->type == FILE_TYPE_DISVAR) {
+                // Display file - open in viewer
+                // Build full path: "DEVICE.PATH.FILENAME"
+                char fullpath[160];
+                unsigned int pos = 0;
+                unsigned int i;
+                Device *dev = win->device;
+
+                // Copy device name
+                if (dev) {
+                    for (i = 0; dev->name[i] && pos < 8; i++) {
+                        fullpath[pos++] = dev->name[i];
+                    }
+                }
+                fullpath[pos++] = '.';
+
+                // Copy path
+                for (i = 0; win->path[i] && pos < 140; i++) {
+                    fullpath[pos++] = win->path[i];
+                }
+
+                // Copy filename
+                for (i = 0; file->name[i] && pos < 158; i++) {
+                    fullpath[pos++] = file->name[i];
+                }
+                fullpath[pos] = 0;
+
+                // Open viewer
+                viewer_view_file(fullpath,
+                                 (file->type == FILE_TYPE_DISVAR) ? 1 : 0,
+                                 file->rec_len);
+
+                // Redraw after viewer closes
+                input_update_focus_status();
             } else {
-                // Disk file - TODO
-                ui_status("File selected");
+                // Other file types (INT/FIX, INT/VAR) - not viewable as text
+                ui_status("Cannot view this file type");
             }
         }
         return;
@@ -204,13 +285,8 @@ static void input_open(void) {
     if (g_has_selection && g_selected >= 0 && (unsigned int)g_selected < g_app.device_count) {
         win_idx = window_open(&g_app.devices[g_selected]);
         if (win_idx >= 0) {
-            // Load directory from device
-            win = &g_app.windows[win_idx];
-            window_load_dir(win, 0);
-            // Redraw to show files
-            extern void window_redraw_all(void);
-            window_redraw_all();
-            // Update focus status
+            // window_open already loaded directory and drew content
+            // Update focus status to show path
             input_update_focus_status();
         }
     } else {
@@ -247,6 +323,8 @@ static void input_back(void) {
         ui_draw_desktop();
         // Redraw remaining window if any
         window_redraw_all();
+        // Update status to show new focus
+        input_update_focus_status();
         // Only show selection if focus went to desktop
         if (g_app.focus == FOCUS_DESKTOP && g_has_selection) {
             ui_select_device(g_selected, 1);
@@ -259,6 +337,8 @@ static void input_back(void) {
         ui_draw_desktop();
         // Redraw remaining window if any
         window_redraw_all();
+        // Update status to show new focus
+        input_update_focus_status();
         // Only show selection if focus went to desktop
         if (g_app.focus == FOCUS_DESKTOP && g_has_selection) {
             ui_select_device(g_selected, 1);
@@ -287,25 +367,15 @@ static void input_page_down(void) {
     }
 }
 
-// Update status line to show current focus
+// Update status line to show current focus/path
 static void input_update_focus_status(void) {
-    char buf[16];
     Window *win;
 
     if (g_app.focus == FOCUS_DESKTOP) {
         ui_status("Desktop");
     } else {
         win = window_get_focused();
-        if (win) {
-            // Format: "L-CART" or "R-DSK1" etc.
-            if (g_app.focus == FOCUS_WINDOW1) {
-                buf[0] = 'R'; buf[1] = '-';  // Right window
-            } else {
-                buf[0] = 'L'; buf[1] = '-';  // Left window
-            }
-            window_get_title(win, buf + 2);
-            ui_status(buf);
-        }
+        window_show_path(win);
     }
 }
 

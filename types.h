@@ -17,6 +17,7 @@
 #define FILE_TYPE_DISVAR   4
 #define FILE_TYPE_GROM     5   // GROM-based cartridge program
 #define FILE_TYPE_ROM      6   // ROM-based cartridge program
+#define FILE_TYPE_DIR      7   // Subdirectory
 
 // Device entry - represents a device icon on the desktop
 typedef struct {
@@ -47,6 +48,8 @@ typedef struct {
     unsigned int file_count;    // Number of files in buffer
     unsigned int page_start;    // Starting file index for current page
     Device *device;             // Device this window shows
+    char volume_name[12];       // Disk volume name (max 10 chars + null)
+    char path[128];             // Current subdirectory path (e.g., "SUBDIR.NESTED.")
     FileEntry files[WIN_MAX_FILES];  // File entries for this window
 } Window;
 
