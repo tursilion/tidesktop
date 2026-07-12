@@ -15,7 +15,7 @@
 // 28C0 DIR_BUF_ADDR/VIEW_BUF_ADDR (max 256 bytes)
 // 29C0 Viewer buffer (may be resused when viewer not active - 18 rows * 128 bytes)
 // 32C0
-// 37D0 RESERVED FOR DISK INCLUDING CF7
+// 3980 RESERVED FOR DISK INCLUDING CF7 (with files(2))
 
 // Screen dimensions (Graphics I)
 #define SCREEN_WIDTH    32

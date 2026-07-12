@@ -27,6 +27,9 @@ unsigned int g_color_divider = COLOR_DKGREEN;  // Divider line color
 // Global title string (customizable)
 const char *g_title_string = "TI DESKTOP";
 
+// allows us to restart the app
+unsigned int restart_app = 0;
+
 // Clock (RTC) support
 unsigned int g_clock_available = 0;  // 1 if CLOCK device found
 unsigned int g_clock_cru = 0;        // CRU base of clock device
@@ -93,37 +96,50 @@ static void app_init(void) {
 
 // Main entry point
 int main(void) {
-    // Initialize VDP
-    vdp_init();
+    // files(2) gives us enough room for a full bitmap image to be loaded
+    files(2);
 
-    // Initialize application state
-    app_init();
+    // this lets us restart after an operation that destroys VDP setup
+    for (;;) {
+        // Initialize VDP
+        vdp_init();
 
-    // Initialize window system
-    window_init();
+        // Initialize application state
+        app_init();
 
-    // Initialize UI
-    ui_init();
+        // Initialize window system
+        window_init();
 
-    // Draw initial desktop
-    ui_draw_desktop();
+        // Initialize UI
+        ui_init();
 
-    // Main event loop
-    {
-        unsigned int clock_counter = 0;
+        // Draw initial desktop
+        ui_draw_desktop();
 
-        for (;;) {
-            // Wait for vblank to pace the loop
-            vdpwaitvint();
+        // clear the restart flag
+        restart_app = 0;
 
-            // Process keyboard input
-            input_process();
+        // Main event loop
+        {
+            unsigned int clock_counter = 0;
 
-            // Update clock display periodically (every ~1 second at 60Hz)
-            clock_counter++;
-            if (clock_counter >= 60) {
-                clock_counter = 0;
-                clock_update_display();
+            for (;;) {
+                // Wait for vblank to pace the loop
+                vdpwaitvint();
+
+                // Process keyboard input
+                input_process();
+
+                // Update clock display periodically (every ~1 second at 60Hz)
+                clock_counter++;
+                if (clock_counter >= 60) {
+                    clock_counter = 0;
+                    clock_update_display();
+                }
+                
+                if (restart_app) {
+                    break;
+                }
             }
         }
     }

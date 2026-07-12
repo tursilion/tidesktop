@@ -34,7 +34,7 @@ LIBS=-lti99
 # Linker flags - text at >A000 (high expansion), data at >2000 (low expansion)
 LDFLAGS=-M -Ttext=0xA000 -Tdata=0x2000
 
-.PHONY: all clean install
+.PHONY: all clean install test
 
 # Object files - crt0 must be first!
 OBJECTS = crt0.o main.o chars.o ui.o input.o device.o window.o viewer.o scratchloaderDesktop.o
@@ -46,7 +46,7 @@ $(NAME): $(OBJECTS)
 	$(ELF2EA5) $(NAME).elf $(NAME)
 
 clean:
-	-rm -f *.o *.elf *.map DESKTOP* *.s
+	-rm -f *.o *.elf *.map DESKTOP* TEST* *.s
 
 install: $(NAME)
 	$(CP) DESKTOP* $(CLASSIC99_DSK1)
@@ -63,3 +63,9 @@ crt0.o: crt0.asm
 # C files
 %.o: %.c
 	$(CC) -c $< $(CFLAGS) $(INCPATH) -o $@
+
+# Test program - uses files.h to open a non-existent file
+test: crt0.o test.o
+	$(LD) crt0.o test.o $(LIBS) $(LIBPATH) $(LDFLAGS) -o test.elf > test.map
+	$(ELF2EA5) test.elf test
+	$(CP) TEST* $(CLASSIC99_DSK1)

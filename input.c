@@ -41,6 +41,9 @@ extern void viewer_view_file(const char *path, unsigned int is_variable, unsigne
 // Forward declaration for local function
 static void input_update_focus_status(void);
 
+// restart attempt if EA5 fails from main.c
+extern unsigned int restart_app;
+
 // Currently selected device on desktop (-1 = none selected)
 static int g_selected = -1;
 static int g_has_selection = 0;
@@ -228,8 +231,9 @@ static void input_open(void) {
                 ui_status("Loading...");
                 // This does not return on success
                 ea5ld(fullpath);
-                // If we get here, load failed
-                ui_status("Load failed");
+                // If we get here, load failed - but VDP is trashed, so we need to restart
+                restart_app = 1;
+                return;
             } else if (file->type == FILE_TYPE_ROM) {
                 // Launch ROM program - branch to entry address
                 // This does not return

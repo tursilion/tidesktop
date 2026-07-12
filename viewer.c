@@ -215,6 +215,7 @@ static unsigned int viewer_read_page(unsigned int record_num) {
     unsigned int char_count;
     unsigned int vdp_rec_addr;
     unsigned int copy_len;
+    unsigned int reopened = 0;
     char lclbuf[256];
 
     if (!g_viewer.is_open) {
@@ -223,6 +224,8 @@ static unsigned int viewer_read_page(unsigned int record_num) {
             if (!viewer_reopen_file()) {
                 return 0;
             }
+            // we need to scan up to the correct record
+            reopened = 1;
         } else {
             // some other condition
             return 0;
@@ -238,7 +241,7 @@ static unsigned int viewer_read_page(unsigned int record_num) {
         pab.RecordNumber = record_num;
     } else {
         // Variable: if going backwards, rewind and skip forward
-        if (record_num < g_viewer.current_rec || record_num == 0) {
+        if (record_num < g_viewer.current_rec || record_num == 0 || reopened) {
             // Rewind the file
             pab.OpCode = DSR_REWIND;
             pab.RecordNumber = 0;
@@ -253,6 +256,7 @@ static unsigned int viewer_read_page(unsigned int record_num) {
                     // Error or EOF while skipping
                     // disk errors on the TI close the file
                     // note that we probably read some of it!
+                    // This probably shouldn't happen...
                     g_viewer.at_eof = 1;
                     g_viewer.is_open = 0;
                     g_viewer.rec_count = i-1;
@@ -277,6 +281,8 @@ static unsigned int viewer_read_page(unsigned int record_num) {
         result = dsrlnk(&pab, VIEW_PAB_ADDR);
         if (result != 0) {
             // End of file or error
+            g_viewer.is_open = 0;
+            g_viewer.rec_count = pab.RecordNumber;
             g_viewer.at_eof = 1;
             break;
         }

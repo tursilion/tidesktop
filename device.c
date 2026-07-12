@@ -1029,16 +1029,6 @@ void device_scan(void) {
     }
 }
 
-// Open a device and read its directory
-unsigned int device_open(Device *dev) {
-    // TODO: Implement directory reading
-    // For disk: Open device directory (do not use direct sector reads). Ask user for details on LFN extension.
-    // For cartridge: Enumerate ROM program headers
-
-    (void)dev;
-    return 0;
-}
-
 // Set up Editor/Assembler environment before launching a program
 // This is the safest environment for most programs
 static void cart_setup_ea_environment(void) {
