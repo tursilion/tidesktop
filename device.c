@@ -406,7 +406,6 @@ static unsigned int disk_read_dir_path(Device *dev, const char *path, char *volu
     unsigned char data[256];
     unsigned int count;
     unsigned int record_num;
-    unsigned int skip_count;
     unsigned int lfn_mode;
     unsigned int name_len;
     unsigned int i;
@@ -439,11 +438,11 @@ static unsigned int disk_read_dir_path(Device *dev, const char *path, char *volu
     dir_name[pos] = 0;
     i = pos;  // Set i for pab.NameLength
 
-    // Try opening as Long Filename mode first (Internal Variable, length 0)
+    // Try opening as Long Filename mode first (Internal Fixed 254)
     pab.OpCode = DSR_OPEN;
-    pab.Status = DSR_TYPE_VARIABLE | DSR_TYPE_INTERNAL | DSR_TYPE_INPUT;
+    pab.Status = DSR_TYPE_INTERNAL | DSR_TYPE_INPUT;
     pab.VDPBuffer = DIR_BUF_ADDR;
-    pab.RecordLength = 0;  // Auto-detect (LFN mode)
+    pab.RecordLength = 254;  // LFN mode - but we still need to read back the true value
     pab.CharCount = 0;
     pab.RecordNumber = 0;
     pab.ScreenOffset = 0;
@@ -471,22 +470,18 @@ static unsigned int disk_read_dir_path(Device *dev, const char *path, char *volu
     }
 
     // Calculate which records to skip for this page
-    skip_count = page * max_files;
-    record_num = 0;  // Start at record 0 (disk info)
+    record_num = page * max_files;  // after we read the disk index, there's a plus one in the loop to account for it
     count = 0;
+    pab.RecordNumber = 0xffff;
 
-    // For short filename mode, we can jump directly to the record
-    if (!lfn_mode && skip_count > 0) {
-        record_num = skip_count + 1;  // +1 to skip disk info record
-        skip_count = 0;
-    }
-
-    // Read directory entries
+    // Read directory entries - always read record zero first to get the disk name!
     while (count < max_files) {
         // Set up PAB for READ
         pab.OpCode = DSR_READ;
         pab.CharCount = 0;
-        if (!lfn_mode) {
+        if (pab.RecordNumber == 0xffff) {
+            pab.RecordNumber = 0;
+        } else {
             pab.RecordNumber = record_num;
         }
 
@@ -507,7 +502,12 @@ static unsigned int disk_read_dir_path(Device *dev, const char *path, char *volu
 
         // Parse the record
         name_len = data[0];
-        if (name_len == 0 || name_len > 32) {
+        if (name_len > 32) {
+            // our max size!
+            record_num++;
+            continue;
+        }
+        if (name_len == 0) {
             break;  // Invalid or end of directory
         }
 
@@ -524,7 +524,7 @@ static unsigned int disk_read_dir_path(Device *dev, const char *path, char *volu
         ftype = ti_float_to_int(&data[offset + 1]);
 
         // Record 0 is disk info - extract volume name, then skip
-        if (record_num == 0) {
+        if (pab.RecordNumber == 0) {
             // Volume name is in the name field (max 10 chars)
             if (volume_name) {
                 unsigned int vol_len = (name_len > 10) ? 10 : name_len;
@@ -540,13 +540,6 @@ static unsigned int disk_read_dir_path(Device *dev, const char *path, char *volu
         // Check for end of directory (type 0)
         if (ftype == 0) {
             break;
-        }
-
-        // Skip entries until we reach our page
-        if (skip_count > 0) {
-            skip_count--;
-            record_num++;
-            continue;
         }
 
         // Copy filename
