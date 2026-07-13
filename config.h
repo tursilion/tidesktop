@@ -53,6 +53,7 @@
 #define FILE_NAME_LEN   32      // Max filename length (display)
 #define FILE_LINE_LEN   43      // Total line length
 #define PATH_MAX_LEN    128     // Max internal path/filename buffer size
+#define TITLE_TEXT_LEN  16      // Max title bar text length (user configurable)
 
 // Window positions (Y is row 2, below title bar and divider)
 #define WIN1_X          16      // Right half (dual window mode)

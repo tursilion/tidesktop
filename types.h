@@ -74,8 +74,8 @@ extern unsigned int g_color_icon;     // Icon color
 extern unsigned int g_color_select;   // Selection highlight color
 extern unsigned int g_color_title;    // Title bar accent color (cyan)
 
-// Global title string (for customization)
-extern const char *g_title_string;
+// Global title string buffer (user configurable via menu)
+extern char g_title_string[TITLE_TEXT_LEN + 1];
 
 // Convert ASCII to title bar mini-font character
 extern unsigned int char_to_title(unsigned int c);

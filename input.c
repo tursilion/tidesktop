@@ -36,6 +36,7 @@ extern void window_load_dir(Window *win, unsigned int page);
 extern void window_draw_indicator(void);
 extern void window_show(Window *win);
 extern unsigned int window_enter_subdir(Window *win);
+extern unsigned int window_up_dir(Window *win);
 extern void window_show_path(Window *win);
 
 // Forward declarations from device.c
@@ -357,7 +358,7 @@ static const char *color_names[] = {
 #define MENU_X      5
 #define MENU_Y      3
 #define MENU_W      22
-#define MENU_H      10
+#define MENU_H      11
 
 // Draw a simple menu window frame
 static void menu_draw_frame(const char *title) {
@@ -419,6 +420,25 @@ static void menu_apply_colors(void) {
     chars_init();
 }
 
+// Draw the title text line in the config menu (key 9)
+// Format matches color lines: "9:Title " + up to 12 chars of text
+static void menu_draw_title_line(void) {
+    unsigned int addr = gImage + VDP_SCREEN_POS(MENU_Y + 9, MENU_X + 1);
+    unsigned int i;
+    unsigned int ended = 0;
+
+    VDP_SET_ADDRESS_WRITE(addr);
+    VDPWD('9');
+    VDPWD(':');
+    VDPWD('T'); VDPWD('i'); VDPWD('t'); VDPWD('l'); VDPWD('e');
+    VDPWD(' ');
+    // Show up to 12 chars of current title (pad with spaces)
+    for (i = 0; i < 12; i++) {
+        if (g_title_string[i] == 0) ended = 1;
+        VDPWD(ended ? ' ' : g_title_string[i]);
+    }
+}
+
 // Helper to draw all color lines
 static void menu_draw_all_colors(void) {
     menu_draw_color_line(MENU_Y + 1, '1', "Backgnd", g_color_bg);
@@ -429,6 +449,7 @@ static void menu_draw_all_colors(void) {
     menu_draw_color_line(MENU_Y + 6, '6', "TitleBG", g_color_title_bg);
     menu_draw_color_line(MENU_Y + 7, '7', "TitleFG", g_color_title_fg);
     menu_draw_color_line(MENU_Y + 8, '8', "Divider", g_color_divider);
+    menu_draw_title_line();
 }
 
 // Helper to refresh colors after change (VDP updates reflect immediately)
@@ -436,6 +457,105 @@ static void menu_refresh_colors(void) {
     menu_apply_colors();
     // Just redraw the color values in the menu - VDP color change is immediate
     menu_draw_all_colors();
+}
+
+// Title entry popup dimensions (below the color menu)
+#define TITLE_POP_X     5
+#define TITLE_POP_Y     16
+#define TITLE_POP_W     22
+#define TITLE_POP_H     3
+
+// Draw the title edit buffer with a cursor in the popup
+static void menu_draw_title_edit(const char *buf, unsigned int len) {
+    unsigned int addr = gImage + VDP_SCREEN_POS(TITLE_POP_Y + 1, TITLE_POP_X + 2);
+    unsigned int i;
+
+    VDP_SET_ADDRESS_WRITE(addr);
+    for (i = 0; i < len; i++) {
+        VDPWD(buf[i]);
+    }
+    // Cursor, then pad to full field width
+    for (i = len; i < TITLE_TEXT_LEN + 1; i++) {
+        VDPWD((i == len && len < TITLE_TEXT_LEN) ? '_' : ' ');
+    }
+}
+
+// Title text entry popup - type up to 16 chars
+// Enter accepts (stores to g_title_string), Fctn-9 cancels, Fctn-S deletes
+static void menu_title_entry(void) {
+    unsigned int key, lastkey = 0;
+    char buf[TITLE_TEXT_LEN + 1];
+    unsigned int len;
+
+    // External generic window drawing from ui.c
+    extern void ui_draw_window(unsigned int x, unsigned int y, unsigned int w, unsigned int h, const char *title);
+
+    // Copy current title into edit buffer
+    for (len = 0; len < TITLE_TEXT_LEN && g_title_string[len]; len++) {
+        buf[len] = g_title_string[len];
+    }
+
+    ui_draw_window(TITLE_POP_X, TITLE_POP_Y, TITLE_POP_W, TITLE_POP_H, "Title Text");
+    menu_draw_title_edit(buf, len);
+
+    ui_status("Enter:OK  F9:Cancel");
+
+    // Wait for the '9' that opened this popup to be released,
+    // since '9' is also a valid title character
+    do {
+        kscan(KSCAN_MODE_BASIC);
+    } while (KSCAN_KEY != KSCAN_NOKEY);
+
+    for (;;) {
+        kscan(KSCAN_MODE_BASIC);
+        key = KSCAN_KEY;
+
+        if (key == KSCAN_NOKEY) {
+            lastkey = 0;
+            continue;
+        }
+
+        if (key == lastkey) continue;
+        lastkey = key;
+
+        {
+            volatile unsigned int d;
+            for (d = 0; d < 500; d++);
+        }
+
+        if (key == KEY_BACK) {
+            return;  // Cancel - title unchanged
+        }
+
+        if (key == KEY_ENTER) {
+            // Accept - copy edit buffer to global title
+            unsigned int i;
+            for (i = 0; i < len; i++) {
+                g_title_string[i] = buf[i];
+            }
+            g_title_string[len] = 0;
+            return;
+        }
+
+        if (key == KEY_LEFT || key == KEY_DELETE) {
+            // Backspace
+            if (len > 0) {
+                len--;
+                menu_draw_title_edit(buf, len);
+            }
+            continue;
+        }
+
+        // Title mini-font only has A-Z, 0-9 and space - fold lowercase
+        if (key >= 'a' && key <= 'z') key -= 32;
+
+        if ((key >= 'A' && key <= 'Z') || (key >= '0' && key <= '9') || key == ' ') {
+            if (len < TITLE_TEXT_LEN) {
+                buf[len++] = key;
+                menu_draw_title_edit(buf, len);
+            }
+        }
+    }
 }
 
 // Color configuration menu
@@ -446,7 +566,7 @@ static void menu_color_config(void) {
     menu_draw_frame("Colors");
     menu_draw_all_colors();
 
-    ui_status("1-7:Cycle  Fctn-9:Done");
+    ui_status("1-8:Color 9:Title F9:Done");
 
     // Show preview selection brackets around icon 0
     if (g_app.device_count > 0) {
@@ -509,6 +629,24 @@ static void menu_color_config(void) {
         if (key == '8') {
             g_color_divider = (g_color_divider + 1) & 0x0F;
             menu_refresh_colors();
+        }
+        if (key == '9') {
+            menu_title_entry();
+            // Wait for release so the popup's Enter/F9 doesn't act here
+            do {
+                kscan(KSCAN_MODE_BASIC);
+            } while (KSCAN_KEY != KSCAN_NOKEY);
+            // Popup covered the desktop area - redraw everything
+            // (also shows the new title bar text), then the menu again
+            ui_draw_desktop();
+            window_redraw_all();
+            menu_draw_frame("Colors");
+            menu_draw_all_colors();
+            ui_status("1-8:Color 9:Title F9:Done");
+            if (g_app.device_count > 0) {
+                ui_select_device(0, 1);
+            }
+            lastkey = 0;
         }
     }
 
@@ -879,6 +1017,16 @@ static void input_menu(void) {
 static void input_back(void) {
     unsigned int win_idx;
     extern void window_redraw_all(void);
+
+    // If the focused window is in a subdirectory, go up one level
+    // instead of closing the window
+    if (g_app.focus != FOCUS_DESKTOP) {
+        Window *win = window_get_focused();
+        if (win && window_up_dir(win)) {
+            input_update_focus_status();  // Show new path
+            return;
+        }
+    }
 
     if (g_app.focus == FOCUS_WINDOW1) {
         // Close window 1

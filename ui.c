@@ -4,7 +4,6 @@
 #include "types.h"
 
 // External globals
-extern const char *g_title_string;
 extern unsigned int g_color_bg;
 extern unsigned int g_color_fg;
 

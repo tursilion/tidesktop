@@ -708,6 +708,34 @@ unsigned int window_enter_subdir(Window *win) {
     return 1;
 }
 
+// Go up one directory level - strips the last path component
+// win->path holds everything after the device name ("SUB1.SUB2." form),
+// so an empty path means we are at the device root
+// Returns 1 if it went up, 0 if already at root
+unsigned int window_up_dir(Window *win) {
+    unsigned int len;
+    int i;
+
+    if (!win || !win->active) return 0;
+
+    for (len = 0; win->path[len]; len++);
+    if (len == 0) return 0;
+
+    // Path ends with a trailing dot - find the dot before the last
+    // component and truncate just after it (or to empty at top level)
+    for (i = (int)len - 2; i >= 0; i--) {
+        if (win->path[i] == '.') break;
+    }
+    win->path[i + 1] = 0;
+
+    // Reset to page 0 and reload
+    win->page_start = 0;
+    win->cursor_y = 0;
+    window_load_dir(win, 0);
+
+    return 1;
+}
+
 // Show the current path on the status bar
 // Format: "DEV.PATH" or just "DEV." if at root
 void window_show_path(Window *win) {

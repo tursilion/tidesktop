@@ -26,8 +26,8 @@ unsigned int g_color_title_bg= COLOR_CYAN;     // Title bar accent
 unsigned int g_color_title_fg= COLOR_WHITE;    // Title bar text
 unsigned int g_color_divider = COLOR_DKGREEN;  // Divider line color
 
-// Global title string (customizable)
-const char *g_title_string = "TI DESKTOP";
+// Global title string buffer (customizable via menu, up to 16 chars)
+char g_title_string[TITLE_TEXT_LEN + 1] = "TI DESKTOP";
 
 // allows us to restart the app
 unsigned int restart_app = 0;
