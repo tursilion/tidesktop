@@ -54,6 +54,12 @@ extern void viewer_view_file(const char *path, unsigned int is_variable, unsigne
 extern unsigned int viewer_is_bitmap(const char *path);
 extern void viewer_show_bitmap(const char *path);
 
+// Forward declarations from prefs.c
+extern unsigned int prefs_save(void);
+
+// Forward declaration from device.c
+extern void clock_remove(void);
+
 // Forward declaration for local function
 static void input_update_focus_status(void);
 
@@ -358,7 +364,7 @@ static const char *color_names[] = {
 #define MENU_X      5
 #define MENU_Y      3
 #define MENU_W      22
-#define MENU_H      11
+#define MENU_H      12
 
 // Draw a simple menu window frame
 static void menu_draw_frame(const char *title) {
@@ -439,6 +445,23 @@ static void menu_draw_title_line(void) {
     }
 }
 
+// Draw the clock removal line in the config menu (key 0)
+// Only shown when a clock device is installed; blank otherwise
+static void menu_draw_clock_line(void) {
+    static const char remove_msg[] = "0:Remove Clock";
+    unsigned int addr = gImage + VDP_SCREEN_POS(MENU_Y + 10, MENU_X + 1);
+    unsigned int i;
+
+    VDP_SET_ADDRESS_WRITE(addr);
+    for (i = 0; i < 20; i++) {
+        if (g_clock_available && i < sizeof(remove_msg) - 1) {
+            VDPWD(remove_msg[i]);
+        } else {
+            VDPWD(' ');
+        }
+    }
+}
+
 // Helper to draw all color lines
 static void menu_draw_all_colors(void) {
     menu_draw_color_line(MENU_Y + 1, '1', "Backgnd", g_color_bg);
@@ -450,6 +473,7 @@ static void menu_draw_all_colors(void) {
     menu_draw_color_line(MENU_Y + 7, '7', "TitleFG", g_color_title_fg);
     menu_draw_color_line(MENU_Y + 8, '8', "Divider", g_color_divider);
     menu_draw_title_line();
+    menu_draw_clock_line();
 }
 
 // Helper to refresh colors after change (VDP updates reflect immediately)
@@ -630,6 +654,14 @@ static void menu_color_config(void) {
             g_color_divider = (g_color_divider + 1) & 0x0F;
             menu_refresh_colors();
         }
+        if (key == '0') {
+            // Remove the clock device (only if installed)
+            // Persisted by the save on dialog exit
+            if (g_clock_available) {
+                clock_remove();
+                menu_draw_clock_line();  // Clears the menu line
+            }
+        }
         if (key == '9') {
             menu_title_entry();
             // Wait for release so the popup's Enter/F9 doesn't act here
@@ -654,6 +686,9 @@ static void menu_color_config(void) {
     if (g_app.device_count > 0) {
         ui_select_device(0, 0);
     }
+
+    // Persist configuration on dialog exit
+    prefs_save();
 
     // Redraw desktop and windows
     ui_draw_desktop();
@@ -790,6 +825,8 @@ static void menu_change_icon(unsigned int dev_idx) {
             // Clear old type flags, set new ones
             dev->flags = (dev->flags & ~(DEVICE_DISK | DEVICE_CART | DEVICE_HD | DEVICE_RAMDISK)) | icon_flags[choice];
             dev->icon = icon_chars_tl[choice];
+            // Persist the icon change
+            prefs_save();
             break;
         }
     }
@@ -873,6 +910,9 @@ static void menu_remove_device(unsigned int dev_idx) {
     // Clear selection
     g_has_selection = 0;
     g_selected = -1;
+
+    // Persist the device removal
+    prefs_save();
 
     // Redraw
     ui_draw_desktop();

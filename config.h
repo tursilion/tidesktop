@@ -14,6 +14,8 @@
 // 2880 DIR_PAB_ADDR/VIEW_PAB_ADDR
 // 28C0 DIR_BUF_ADDR/VIEW_BUF_ADDR (max 256 bytes)
 // 29C0 Viewer buffer (may be resused when viewer not active - 18 rows * 128 bytes)
+//      Also reused by prefs.c when viewer inactive:
+//      29C0 PREFS_PAB_ADDR, 2A00 PREFS_BUF_ADDR (max 512 bytes)
 // 32C0
 // 3980 RESERVED FOR DISK INCLUDING CF7 (with files(2))
 

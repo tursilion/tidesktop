@@ -12,6 +12,7 @@ extern void chars_init(void);
 extern void window_init(void);
 extern void clock_update_display(void);
 extern void input_restore_selection(void);
+extern unsigned int prefs_load(void);
 
 // Global application state
 AppState g_app;
@@ -106,6 +107,16 @@ int main(void) {
         if (!restart_app) {
             app_init();
             window_init();
+
+            // Load saved preferences (colors, title, devices, clock)
+            // Holding space at startup skips the load (keeps defaults)
+            // On failure the defaults from app_init remain in place
+            kscan(KSCAN_MODE_BASIC);
+            if (KSCAN_KEY != ' ' && prefs_load()) {
+                // Re-apply loaded colors (vdp_init used the defaults)
+                VDP_SET_REGISTER(VDP_REG_COL, g_color_bg);
+                chars_init();
+            }
         } else {
             // Reset non-device state
             g_app.menu_active = 0;

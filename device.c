@@ -989,6 +989,12 @@ void device_scan(void) {
     // Run selection dialog
     added = device_run_selection();
 
+    // Persist if the device list changed (or the clock was just found)
+    if (added > 0 || (g_clock_available && !clock_was_set)) {
+        extern unsigned int prefs_save(void);
+        prefs_save();
+    }
+
     // Redraw desktop with new devices
     ui_draw_desktop();
 
@@ -1184,6 +1190,22 @@ unsigned int clock_read_time(char *time_buf) {
     time_buf[out_idx] = 0;
 
     return (out_idx > 0) ? 1 : 0;
+}
+
+// Remove the clock device - forget it and clear the time display
+void clock_remove(void) {
+    unsigned int i;
+
+    g_clock_available = 0;
+    g_clock_cru = 0;
+
+    // Forget last displayed time so a future re-add redraws
+    for (i = 0; i < 9; i++) {
+        g_last_time[i] = 0;
+    }
+
+    // Restore the divider chars where the time was displayed
+    hchar(SCREEN_HEIGHT - 2, SCREEN_WIDTH - 9, CHAR_DIVIDER, 8);
 }
 
 // Update the clock display on screen

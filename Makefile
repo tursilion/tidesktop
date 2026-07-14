@@ -37,7 +37,7 @@ LDFLAGS=-M -Ttext=0xA000 -Tdata=0x2000
 .PHONY: all clean install test
 
 # Object files - crt0 must be first!
-OBJECTS = crt0.o main.o chars.o ui.o input.o device.o window.o viewer.o scratchloaderDesktop.o
+OBJECTS = crt0.o main.o chars.o ui.o input.o device.o window.o viewer.o prefs.o scratchloaderDesktop.o
 
 all: $(NAME)
 

@@ -3,7 +3,10 @@
     "allow": [
       "Bash(make clean:*)",
       "Bash(make)",
-      "Bash(make install:*)"
+      "Bash(make install:*)",
+      "Bash(xxd /mnt/d/work/ti/desktop/DESKTOP_PREFS)",
+      "Bash(awk '/^prefs_load:/,/^\\\\tb\\\\t\\\\*r11/' /mnt/d/work/ti/desktop/prefs.s)",
+      "Bash(xxd *)"
     ]
   }
 }
