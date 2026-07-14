@@ -15,8 +15,8 @@ void window_show(Window *win);
 extern unsigned int device_read_dir(Device *dev, FileEntry *files, unsigned int max_files, unsigned int page);
 extern unsigned int device_read_dir_with_path(Device *dev, const char *path, char *volume_name, FileEntry *files, unsigned int max_files, unsigned int page);
 
-// Global default scroll position (remembered across windows)
-static unsigned int g_default_scroll_x = FILE_COL_NAME;
+// Global default scroll position (remembered across windows, persisted in prefs)
+unsigned int g_default_scroll_x = FILE_COL_NAME;
 
 // Type prefix strings (2 chars each) - used with record length
 // PROG, GROM, ROM, DIR have no record length, others are XX + nnn format

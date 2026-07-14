@@ -16,6 +16,9 @@ extern unsigned int g_color_title_bg; // Title bar accent color
 extern unsigned int g_color_title_fg; // Title bar text color
 extern unsigned int g_color_divider;  // Divider line color
 
+// Default window horizontal scroll position from window.c
+extern unsigned int g_default_scroll_x;
+
 // Hardcoded preferences file path (for now)
 static const char prefs_name[] = "DSK0.DESKTOP_PREFS";
 #define PREFS_NAME_LEN  18
@@ -29,13 +32,17 @@ static const char prefs_name[] = "DSK0.DESKTOP_PREFS";
 // Blob identification and sizing
 #define PREFS_MAGIC_1   'D'
 #define PREFS_MAGIC_2   'P'
-#define PREFS_VERSION   2
-#define PREFS_HDR_SIZE  30
+#define PREFS_VERSION   3
+#define PREFS_HDR_SIZE  31
 #define PREFS_DEV_SIZE  10
 #define PREFS_MAX_SIZE  (PREFS_HDR_SIZE + PREFS_DEV_SIZE * MAX_DEVICES)
 
-// CPU-side staging buffer for the blob (max 30 + 10*40 = 430 bytes)
+// CPU-side staging buffer for the blob (max 31 + 10*40 = 431 bytes)
 static unsigned char prefs_buf[PREFS_MAX_SIZE];
+
+// Scroll position as last saved/loaded - lets window close skip the
+// disk write when the scroll position hasn't actually changed
+static unsigned int prefs_scroll_saved = FILE_COL_NAME;
 
 // Save preferences to DSK0.DESKTOP_PREFS using the SAVE opcode
 // Returns 0 on success, nonzero DSR error on failure
@@ -43,7 +50,7 @@ static unsigned char prefs_buf[PREFS_MAX_SIZE];
 // Blob format:
 //  Offset  Size   Content
 //  0       2      Magic 'D','P'
-//  2       1      Format version (2)
+//  2       1      Format version (3)
 //  3       1      Device count n (includes CART at index 0)
 //  4       1      Background color (VDP register 7)
 //  5       1      Text (foreground) color
@@ -55,7 +62,8 @@ static unsigned char prefs_buf[PREFS_MAX_SIZE];
 //  11      1      Divider line color
 //  12      17     Title bar text (up to 16 chars + null terminator)
 //  29      1      Clock available flag (0 or 1)
-//  30      10*n   Device entries, each:
+//  30      1      Default window horizontal scroll position
+//  31      10*n   Device entries, each:
 //                   +0   8   Device name (null padded); first byte is
 //                            OR'd with 0x80 so the literal string (e.g.
 //                            "DSK1") never appears in the file - defeats
@@ -93,6 +101,10 @@ unsigned int prefs_save(void) {
 
     // Clock state
     prefs_buf[29] = g_clock_available ? 1 : 0;
+
+    // Window horizontal scroll default
+    prefs_buf[30] = g_default_scroll_x & 0xFF;
+    prefs_scroll_saved = g_default_scroll_x;
 
     // Device entries
     pos = PREFS_HDR_SIZE;
@@ -184,6 +196,13 @@ unsigned int prefs_load(void) {
     // Clock state
     g_clock_available = prefs_buf[29] ? 1 : 0;
 
+    // Window horizontal scroll default (clamp bad values to the name column)
+    g_default_scroll_x = prefs_buf[30];
+    if (g_default_scroll_x >= FILE_LINE_LEN) {
+        g_default_scroll_x = FILE_COL_NAME;
+    }
+    prefs_scroll_saved = g_default_scroll_x;
+
     // Device entries (replaces the whole list, including CART at index 0)
     pos = PREFS_HDR_SIZE;
     for (d = 0; d < count; d++) {
@@ -204,4 +223,12 @@ unsigned int prefs_load(void) {
     g_app.device_count = count;
 
     return 1;
+}
+
+// Re-save preferences if the scroll position changed since the last
+// save or load - called when a window closes
+void prefs_save_scroll(void) {
+    if (g_default_scroll_x != prefs_scroll_saved) {
+        prefs_save();
+    }
 }

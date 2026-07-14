@@ -56,6 +56,7 @@ extern void viewer_show_bitmap(const char *path);
 
 // Forward declarations from prefs.c
 extern unsigned int prefs_save(void);
+extern void prefs_save_scroll(void);
 
 // Forward declaration from device.c
 extern void clock_remove(void);
@@ -1098,9 +1099,9 @@ static void input_back(void) {
         }
     }
 
-    if (g_app.focus == FOCUS_WINDOW1) {
-        // Close window 1
-        win_idx = 0;
+    if (g_app.focus == FOCUS_WINDOW1 || g_app.focus == FOCUS_WINDOW2) {
+        // Close the focused window
+        win_idx = (g_app.focus == FOCUS_WINDOW1) ? 0 : 1;
         window_close(win_idx);
         // Redraw desktop to clear window area
         ui_draw_desktop();
@@ -1112,20 +1113,8 @@ static void input_back(void) {
         if (g_app.focus == FOCUS_DESKTOP && g_has_selection) {
             ui_select_device(g_selected, 1);
         }
-    } else if (g_app.focus == FOCUS_WINDOW2) {
-        // Close window 2
-        win_idx = 1;
-        window_close(win_idx);
-        // Redraw desktop to clear window area
-        ui_draw_desktop();
-        // Redraw remaining window if any
-        window_redraw_all();
-        // Update status to show new focus
-        input_update_focus_status();
-        // Only show selection if focus went to desktop
-        if (g_app.focus == FOCUS_DESKTOP && g_has_selection) {
-            ui_select_device(g_selected, 1);
-        }
+        // Persist the scroll position if it changed
+        prefs_save_scroll();
     } else if (g_has_selection) {
         // On desktop with selection - deselect
         ui_clear_selection();
