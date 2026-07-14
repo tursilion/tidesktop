@@ -43,9 +43,13 @@ extern void window_show_path(Window *win);
 extern unsigned int device_read_dir(Device *dev, FileEntry *files, unsigned int max_files, unsigned int page);
 extern void cart_launch_rom(unsigned int entry_addr);
 extern void cart_launch_grom(unsigned int entry_addr, unsigned int port);
+extern void cart_setup_ea_environment();
 
 // Forward declaration for EA5 loader (scratchloaderDesktop.asm)
-extern void ea5ld(char *filename);
+extern void ea5ld(const char *filename);
+
+// Forward declaration for XB loader (xbloaderDesktop.asm)
+extern void xbld(const char *pFn, unsigned int nStart);
 
 // Forward declaration for text file viewer
 extern void viewer_view_file(const char *path, unsigned int is_variable, unsigned int rec_len);
@@ -241,7 +245,7 @@ static void input_open(void) {
                     window_redraw_all();
                     input_update_focus_status();  // Show new path
                 }
-            } else if (file->type == FILE_TYPE_PROGRAM) {
+            } else if ((file->type == FILE_TYPE_PROGRAM) || ((file->type == FILE_TYPE_INTVAR) && (file->rec_len == 254))) {
                 // Load and run PROGRAM file from disk
                 // Build full path: "DEVICE.PATH.FILENAME"
                 char fullpath[160];
@@ -275,9 +279,23 @@ static void input_open(void) {
                     return;
                 }
 
-                ui_status("Loading...");
-                // This does not return on success
-                ea5ld(fullpath);
+                // set up a basic environment first
+                cart_setup_ea_environment();
+                
+                // TODO: we should do a little heuristics here before blindly loading
+                // - determine if EA5 or program
+                // - if XB, verify an XB cart is present
+                // For now, force the base GROM too
+                *(unsigned char*)0x83fb=0;
+                if (file->type == FILE_TYPE_INTVAR) {
+                    // TODO: need to get the address of XB from the cartridge header
+                    xbld(fullpath, 0x6372);
+                } else {
+                    // TODO: XB comes in program form too...
+                    // This does not return on success
+                    ea5ld(fullpath);
+                }
+                
                 // If we get here, load failed - but VDP is trashed, so we need to restart
                 restart_app = 1;
                 return;

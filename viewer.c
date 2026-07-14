@@ -1,6 +1,3 @@
-// TODO: DF128 failed to open (tried to open it as DF80)
-// libti99all is not returning DSR errors, or we aren't seeing them
-
 // viewer.c - TI-99/4A Desktop Environment Text File Viewer
 #include "config.h"
 #include "types.h"

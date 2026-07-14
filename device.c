@@ -1021,7 +1021,7 @@ void device_scan(void) {
 
 // Set up Editor/Assembler environment before launching a program
 // This is the safest environment for most programs
-static void cart_setup_ea_environment(void) {
+void cart_setup_ea_environment(void) {
     // Set VDP registers 0-7 to E/A defaults
     // R0=00, R1=E0, R2=00, R3=0E, R4=01, R5=06, R6=00, R7=F3
     VDP_SET_REGISTER(VDP_REG_MODE1, 0x80);   // 16K, display off, int disabled
