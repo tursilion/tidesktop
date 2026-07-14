@@ -433,12 +433,10 @@ static void menu_draw_title_line(void) {
     unsigned int i;
     unsigned int ended = 0;
 
-    VDP_SET_ADDRESS_WRITE(addr);
-    VDPWD('9');
-    VDPWD(':');
-    VDPWD('T'); VDPWD('i'); VDPWD('t'); VDPWD('l'); VDPWD('e');
-    VDPWD(' ');
+    vdpmemcpy(addr, (const unsigned char *)"9:Title ", 8);
+
     // Show up to 12 chars of current title (pad with spaces)
+    VDP_SET_ADDRESS_WRITE(addr + 8);
     for (i = 0; i < 12; i++) {
         if (g_title_string[i] == 0) ended = 1;
         VDPWD(ended ? ' ' : g_title_string[i]);
@@ -855,25 +853,12 @@ static unsigned int menu_confirm(const char *msg) {
 
     vdpscreenchar(VDP_SCREEN_POS(11, x), CHAR_WIN_V);
     hchar(11, x + 1, ' ', w - 2);
-    {
-        unsigned int addr = gImage + VDP_SCREEN_POS(11, x + 2);
-        unsigned int i;
-        VDP_SET_ADDRESS_WRITE(addr);
-        for (i = 0; i < len; i++) {
-            VDPWD(msg[i]);
-        }
-    }
+    vdpmemcpy(gImage + VDP_SCREEN_POS(11, x + 2), (const unsigned char *)msg, len);
     vdpscreenchar(VDP_SCREEN_POS(11, x + w - 1), CHAR_WIN_V);
 
     vdpscreenchar(VDP_SCREEN_POS(12, x), CHAR_WIN_V);
     hchar(12, x + 1, ' ', w - 2);
-    {
-        unsigned int addr = gImage + VDP_SCREEN_POS(12, x + 2);
-        VDP_SET_ADDRESS_WRITE(addr);
-        VDPWD('Y'); VDPWD(':'); VDPWD('Y'); VDPWD('e'); VDPWD('s');
-        VDPWD(' '); VDPWD(' ');
-        VDPWD('N'); VDPWD(':'); VDPWD('N'); VDPWD('o');
-    }
+    vdpmemcpy(gImage + VDP_SCREEN_POS(12, x + 2), (const unsigned char *)"Y:Yes  N:No", 11);
     vdpscreenchar(VDP_SCREEN_POS(12, x + w - 1), CHAR_WIN_V);
 
     vdpscreenchar(VDP_SCREEN_POS(13, x), CHAR_WIN_BL);
@@ -902,7 +887,6 @@ static void menu_remove_device(unsigned int dev_idx) {
     g_app.device_count--;
 
     // Clear the last slot
-    g_app.devices[g_app.device_count].cru_base = 0;
     g_app.devices[g_app.device_count].name[0] = 0;
     g_app.devices[g_app.device_count].icon = 0;
     g_app.devices[g_app.device_count].flags = DEVICE_NONE;

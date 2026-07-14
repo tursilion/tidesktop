@@ -20,8 +20,8 @@
 #define FILE_TYPE_DIR      7   // Subdirectory
 
 // Device entry - represents a device icon on the desktop
+// Devices are accessed by name via the DSR, no CRU address needed
 typedef struct {
-    unsigned int cru_base;      // CRU address (0 for cartridge)
     char name[8];               // Device name (up to 7 chars + null)
     unsigned int icon;          // Character code for icon (use int to avoid char issues)
     unsigned int flags;         // DEVICE_DISK, DEVICE_CART, etc
@@ -82,6 +82,5 @@ extern unsigned int char_to_title(unsigned int c);
 
 // Clock (RTC) support
 extern unsigned int g_clock_available;  // 1 if CLOCK device found
-extern unsigned int g_clock_cru;        // CRU base of clock device
 
 #endif // TYPES_H

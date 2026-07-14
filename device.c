@@ -14,7 +14,6 @@ void clock_update_display(void);
 // Scan result entry - device name found during CRU scan
 typedef struct {
     char name[8];           // Device name (up to 7 chars + null)
-    unsigned int cru_base;  // CRU base where found
 } ScanEntry;
 
 // Scan results buffer
@@ -667,7 +666,6 @@ static unsigned int scan_cru_devices(unsigned int cru) {
             entry->name[i] = entry_ptr[5 + i];
         }
         entry->name[name_len] = 0;
-        entry->cru_base = cru;
 
         g_scan_count++;
         count++;
@@ -734,7 +732,6 @@ unsigned int device_add_from_scan(unsigned int scan_idx) {
     // Check for CLOCK device - don't add icon, just set flag
     if (is_clock_device(scan->name)) {
         g_clock_available = 1;
-        g_clock_cru = scan->cru_base;
         return 0;  // Don't add as icon
     }
 
@@ -746,7 +743,6 @@ unsigned int device_add_from_scan(unsigned int scan_idx) {
     for (i = 0; i < 8; i++) {
         dev->name[i] = scan->name[i];
     }
-    dev->cru_base = scan->cru_base;
 
     // Detect device type from name prefix
     if (scan->name[0] == 'W' && scan->name[1] == 'D' && scan->name[2] == 'S') {
@@ -841,13 +837,8 @@ static void device_draw_sel_window(void) {
     vdpscreenchar(VDP_SCREEN_POS(SEL_WIN_Y, SEL_WIN_X + SEL_WIN_W - 1), CHAR_WIN_TR);
 
     // Title
-    {
-        unsigned int addr = gImage + VDP_SCREEN_POS(SEL_WIN_Y, SEL_WIN_X + 2);
-        VDP_SET_ADDRESS_WRITE(addr);
-        VDPWD('S'); VDPWD('e'); VDPWD('l'); VDPWD('e'); VDPWD('c'); VDPWD('t');
-        VDPWD(' '); VDPWD('D'); VDPWD('e'); VDPWD('v'); VDPWD('i'); VDPWD('c');
-        VDPWD('e'); VDPWD('s');
-    }
+    vdpmemcpy(gImage + VDP_SCREEN_POS(SEL_WIN_Y, SEL_WIN_X + 2),
+              (const unsigned char *)"Select Devices", 14);
 
     // Side borders and clear interior
     for (i = 1; i < SEL_WIN_H - 1; i++) {
@@ -1197,7 +1188,6 @@ void clock_remove(void) {
     unsigned int i;
 
     g_clock_available = 0;
-    g_clock_cru = 0;
 
     // Forget last displayed time so a future re-add redraws
     for (i = 0; i < 9; i++) {

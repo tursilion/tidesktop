@@ -29,21 +29,21 @@ static const char prefs_name[] = "DSK0.DESKTOP_PREFS";
 // Blob identification and sizing
 #define PREFS_MAGIC_1   'D'
 #define PREFS_MAGIC_2   'P'
-#define PREFS_VERSION   1
-#define PREFS_HDR_SIZE  32
-#define PREFS_DEV_SIZE  12
+#define PREFS_VERSION   2
+#define PREFS_HDR_SIZE  30
+#define PREFS_DEV_SIZE  10
 #define PREFS_MAX_SIZE  (PREFS_HDR_SIZE + PREFS_DEV_SIZE * MAX_DEVICES)
 
-// CPU-side staging buffer for the blob (max 32 + 12*40 = 512 bytes)
+// CPU-side staging buffer for the blob (max 30 + 10*40 = 430 bytes)
 static unsigned char prefs_buf[PREFS_MAX_SIZE];
 
 // Save preferences to DSK0.DESKTOP_PREFS using the SAVE opcode
 // Returns 0 on success, nonzero DSR error on failure
 //
-// Blob format (multi-byte values big endian):
+// Blob format:
 //  Offset  Size   Content
 //  0       2      Magic 'D','P'
-//  2       1      Format version (1)
+//  2       1      Format version (2)
 //  3       1      Device count n (includes CART at index 0)
 //  4       1      Background color (VDP register 7)
 //  5       1      Text (foreground) color
@@ -55,15 +55,13 @@ static unsigned char prefs_buf[PREFS_MAX_SIZE];
 //  11      1      Divider line color
 //  12      17     Title bar text (up to 16 chars + null terminator)
 //  29      1      Clock available flag (0 or 1)
-//  30      2      Clock CRU base
-//  32      12*n   Device entries, each:
-//                   +0   2   CRU base (0 for cartridge)
-//                   +2   8   Device name (null padded); first byte is
+//  30      10*n   Device entries, each:
+//                   +0   8   Device name (null padded); first byte is
 //                            OR'd with 0x80 so the literal string (e.g.
 //                            "DSK1") never appears in the file - defeats
 //                            Classic99's automatic drive-name remapping
-//                   +10  1   Icon (top-left character code)
-//                   +11  1   Device flags (DEVICE_xxx)
+//                   +8   1   Icon (top-left character code)
+//                   +9   1   Device flags (DEVICE_xxx)
 unsigned int prefs_save(void) {
     struct PAB pab;
     unsigned int pos;
@@ -95,27 +93,22 @@ unsigned int prefs_save(void) {
 
     // Clock state
     prefs_buf[29] = g_clock_available ? 1 : 0;
-    prefs_buf[30] = (g_clock_cru >> 8) & 0xFF;
-    prefs_buf[31] = g_clock_cru & 0xFF;
 
     // Device entries
     pos = PREFS_HDR_SIZE;
     for (d = 0; d < g_app.device_count; d++) {
         Device *dev = &g_app.devices[d];
 
-        prefs_buf[pos]     = (dev->cru_base >> 8) & 0xFF;
-        prefs_buf[pos + 1] = dev->cru_base & 0xFF;
-
         ended = 0;
         for (i = 0; i < 8; i++) {
             if (dev->name[i] == 0) ended = 1;
-            prefs_buf[pos + 2 + i] = ended ? 0 : dev->name[i];
+            prefs_buf[pos + i] = ended ? 0 : dev->name[i];
         }
         // Mask the name so Classic99 doesn't remap drive strings in the file
-        prefs_buf[pos + 2] |= 0x80;
+        prefs_buf[pos] |= 0x80;
 
-        prefs_buf[pos + 10] = dev->icon & 0xFF;
-        prefs_buf[pos + 11] = dev->flags & 0xFF;
+        prefs_buf[pos + 8] = dev->icon & 0xFF;
+        prefs_buf[pos + 9] = dev->flags & 0xFF;
 
         pos += PREFS_DEV_SIZE;
     }
@@ -190,24 +183,21 @@ unsigned int prefs_load(void) {
 
     // Clock state
     g_clock_available = prefs_buf[29] ? 1 : 0;
-    g_clock_cru = ((unsigned int)prefs_buf[30] << 8) | prefs_buf[31];
 
     // Device entries (replaces the whole list, including CART at index 0)
     pos = PREFS_HDR_SIZE;
     for (d = 0; d < count; d++) {
         Device *dev = &g_app.devices[d];
 
-        dev->cru_base = ((unsigned int)prefs_buf[pos] << 8) | prefs_buf[pos + 1];
-
         for (i = 0; i < 7; i++) {
-            dev->name[i] = prefs_buf[pos + 2 + i];
+            dev->name[i] = prefs_buf[pos + i];
         }
         dev->name[7] = 0;
         // Remove the anti-remapping mask from the first name byte
         dev->name[0] &= 0x7F;
 
-        dev->icon = prefs_buf[pos + 10];
-        dev->flags = prefs_buf[pos + 11];
+        dev->icon = prefs_buf[pos + 8];
+        dev->flags = prefs_buf[pos + 9];
 
         pos += PREFS_DEV_SIZE;
     }

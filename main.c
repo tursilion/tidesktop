@@ -35,7 +35,6 @@ unsigned int restart_app = 0;
 
 // Clock (RTC) support
 unsigned int g_clock_available = 0;  // 1 if CLOCK device found
-unsigned int g_clock_cru = 0;        // CRU base of clock device
 
 // Initialize the VDP for Graphics II (bitmap) mode
 // We use bitmap mode but treat it like character mode for per-row colors
@@ -72,7 +71,6 @@ static void app_init(void) {
 
     // Clear device list
     for (i = 0; i < MAX_DEVICES; i++) {
-        g_app.devices[i].cru_base = 0;
         g_app.devices[i].name[0] = 0;
         g_app.devices[i].icon = 0;
         g_app.devices[i].flags = DEVICE_NONE;
@@ -81,7 +79,6 @@ static void app_init(void) {
     // Windows are initialized by window_init()
 
     // Add cartridge as first device (always present)
-    g_app.devices[0].cru_base = 0;
     g_app.devices[0].name[0] = 'C';
     g_app.devices[0].name[1] = 'A';
     g_app.devices[0].name[2] = 'R';
