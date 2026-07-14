@@ -924,7 +924,7 @@ static void menu_remove_device(unsigned int dev_idx) {
 #define DEV_MENU_X      10
 #define DEV_MENU_Y      9
 #define DEV_MENU_W      12
-#define DEV_MENU_H      5
+#define DEV_MENU_H      6
 
 // Draw device popup frame
 static void menu_draw_dev_frame(const char *title) {
@@ -956,32 +956,65 @@ static void menu_draw_dev_frame(const char *title) {
     vdpscreenchar(VDP_SCREEN_POS(y + h - 1, x + w - 1), CHAR_WIN_BR);
 }
 
+// Draw one text line inside the device popup
+static void menu_dev_line(unsigned int row, const char *text) {
+    unsigned int addr = gImage + VDP_SCREEN_POS(row, DEV_MENU_X + 1);
+    unsigned int j;
+
+    VDP_SET_ADDRESS_WRITE(addr);
+    for (j = 0; text[j]; j++) {
+        VDPWD(text[j]);
+    }
+}
+
+// Draw the complete device popup (frame, options, status)
+static void menu_draw_dev_popup(unsigned int is_cart) {
+    menu_draw_dev_frame("Device");
+
+    menu_dev_line(DEV_MENU_Y + 1, "I:Chg Icon");
+    if (!is_cart) {
+        menu_dev_line(DEV_MENU_Y + 2, "R:Remove");
+        menu_dev_line(DEV_MENU_Y + 3, "U:Move Up");
+        menu_dev_line(DEV_MENU_Y + 4, "D:Move Dn");
+        ui_status("I:Icon R:Rem U/D:Move F9");
+    } else {
+        ui_status("I:Icon  F9:Cancel");
+    }
+}
+
+// Swap a device with its neighbor at idx+dir (dir is -1 or +1)
+// Keeps window device pointers following their device structs
+// Returns the device's new index
+static unsigned int menu_move_dev(unsigned int idx, int dir) {
+    unsigned int other = idx + dir;
+    unsigned int w;
+    Device tmp;
+
+    tmp = g_app.devices[other];
+    g_app.devices[other] = g_app.devices[idx];
+    g_app.devices[idx] = tmp;
+
+    // Any open window keeps showing the same device
+    for (w = 0; w < MAX_WINDOWS; w++) {
+        if (g_app.windows[w].device == &g_app.devices[idx]) {
+            g_app.windows[w].device = &g_app.devices[other];
+        } else if (g_app.windows[w].device == &g_app.devices[other]) {
+            g_app.windows[w].device = &g_app.devices[idx];
+        }
+    }
+
+    return other;
+}
+
 // Device popup menu (when icon is selected)
 static void menu_device_popup(unsigned int dev_idx) {
     unsigned int key, lastkey = 0;
+    unsigned int moved = 0;
     extern void window_redraw_all(void);
-    Device *dev = &g_app.devices[dev_idx];
-    // Cartridge is always device 0 and cannot be removed (even if icon changed)
+    // Cartridge is always device 0 and cannot be removed or moved
     unsigned int is_cart = (dev_idx == 0);
 
-    menu_draw_dev_frame("Device");
-
-    // Draw options
-    {
-        unsigned int addr = gImage + VDP_SCREEN_POS(DEV_MENU_Y + 1, DEV_MENU_X + 1);
-        VDP_SET_ADDRESS_WRITE(addr);
-        VDPWD('I'); VDPWD(':'); VDPWD('C'); VDPWD('h'); VDPWD('g');
-        VDPWD(' '); VDPWD('I'); VDPWD('c'); VDPWD('o'); VDPWD('n');
-    }
-
-    if (!is_cart) {
-        unsigned int addr = gImage + VDP_SCREEN_POS(DEV_MENU_Y + 2, DEV_MENU_X + 1);
-        VDP_SET_ADDRESS_WRITE(addr);
-        VDPWD('R'); VDPWD(':'); VDPWD('R'); VDPWD('e'); VDPWD('m');
-        VDPWD('o'); VDPWD('v'); VDPWD('e');
-    }
-
-    ui_status("I:Icon  R:Remove  F9:Cancel");
+    menu_draw_dev_popup(is_cart);
 
     for (;;) {
         kscan(KSCAN_MODE_BASIC);
@@ -1005,12 +1038,15 @@ static void menu_device_popup(unsigned int dev_idx) {
         }
 
         if (key == 'I' || key == 'i') {
+            // Persist any pending reorder along with the icon change
+            if (moved) prefs_save();
             menu_change_icon(dev_idx);
             return;  // Already redrawn
         }
 
         if ((key == 'R' || key == 'r') && !is_cart) {
             if (menu_confirm("Remove device?")) {
+                // menu_remove_device saves the full list (covers moves)
                 menu_remove_device(dev_idx);
                 return;  // Already redrawn
             }
@@ -1018,22 +1054,32 @@ static void menu_device_popup(unsigned int dev_idx) {
             ui_draw_desktop();
             window_redraw_all();
             ui_select_device(dev_idx, 1);
-            menu_draw_dev_frame("Device");
-            {
-                unsigned int addr = gImage + VDP_SCREEN_POS(DEV_MENU_Y + 1, DEV_MENU_X + 1);
-                VDP_SET_ADDRESS_WRITE(addr);
-                VDPWD('I'); VDPWD(':'); VDPWD('C'); VDPWD('h'); VDPWD('g');
-                VDPWD(' '); VDPWD('I'); VDPWD('c'); VDPWD('o'); VDPWD('n');
-            }
-            {
-                unsigned int addr = gImage + VDP_SCREEN_POS(DEV_MENU_Y + 2, DEV_MENU_X + 1);
-                VDP_SET_ADDRESS_WRITE(addr);
-                VDPWD('R'); VDPWD(':'); VDPWD('R'); VDPWD('e'); VDPWD('m');
-                VDPWD('o'); VDPWD('v'); VDPWD('e');
-            }
-            ui_status("I:Icon  R:Remove  F9:Cancel");
+            menu_draw_dev_popup(is_cart);
         }
+
+        // Move up - can't move into the cartridge slot (index 0)
+        if ((key == 'U' || key == 'u' || key == KEY_UP) && !is_cart && dev_idx > 1) {
+            dev_idx = menu_move_dev(dev_idx, -1);
+            moved = 1;
+        } else if ((key == 'D' || key == 'd' || key == KEY_DOWN) && !is_cart &&
+                   dev_idx != 0 && dev_idx + 1 < g_app.device_count) {
+            // Move down - can't move off the end of the list
+            dev_idx = menu_move_dev(dev_idx, 1);
+            moved = 1;
+        } else {
+            continue;
+        }
+
+        // Redraw after a move: selection follows the device
+        g_selected = dev_idx;
+        ui_draw_desktop();
+        window_redraw_all();
+        ui_select_device(dev_idx, 1);
+        menu_draw_dev_popup(is_cart);
     }
+
+    // Persist the new order once on exit
+    if (moved) prefs_save();
 
     // Redraw on cancel
     ui_draw_desktop();
