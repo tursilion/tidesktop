@@ -12,20 +12,10 @@ static int g_sel_visible = 0;
 static unsigned int g_sel_row = 0;
 static unsigned int g_sel_col = 0;
 
-// Draw a horizontal line of characters
-static void ui_hline(unsigned int row, unsigned int col, unsigned int len, unsigned int ch) {
-    hchar(row, col, ch, len);
-}
-
-// Draw a vertical line of characters
-static void ui_vline(unsigned int row, unsigned int col, unsigned int len, unsigned int ch) {
-    vchar(row, col, ch, len);
-}
-
-// Draw a single character at position
-static void ui_putchar(unsigned int row, unsigned int col, unsigned int ch) {
-    vdpscreenchar(VDP_SCREEN_POS(row, col), ch);
-}
+// we don't need wrapper functions...
+#define ui_hline(row,col,len,ch) hchar((row),(col),(ch),(len))
+#define ui_vline(row,col,len,ch) vchar((row),(col),(ch),(len))
+#define ui_putchar(row,col,ch) vdpscreenchar(VDP_SCREEN_POS((row),(col)), ch)
 
 // Draw a string at position (up to maxlen chars)
 static void ui_putstr(unsigned int row, unsigned int col, const char *str, unsigned int maxlen) {
@@ -64,21 +54,15 @@ static void ui_draw_title_bar(const char *title) {
     // Draw left cap
     ui_putchar(0, 0, CHAR_TITLE_L);
 
-    // Draw fill up to title
-    for (i = 1; i < title_start; i++) {
-        ui_putchar(0, i, CHAR_TITLE_FILL);
-    }
+    // Draw fill (will overwrite with title)
+    hchar(0, 1, CHAR_TITLE_FILL, SCREEN_WIDTH-2);
 
     // Draw title text using mini-font (inset appearance)
+    // Can't use ui_putstr here because of the ASCII translation needed
     addr = gImage + VDP_SCREEN_POS(0, title_start);
     VDP_SET_ADDRESS_WRITE(addr);
     for (i = 0; i < title_len && title[i] != 0; i++) {
         VDPWD(char_to_title(title[i]));
-    }
-
-    // Draw fill after title
-    for (i = title_start + title_len; i < SCREEN_WIDTH - 1; i++) {
-        ui_putchar(0, i, CHAR_TITLE_FILL);
     }
 
     // Draw right cap
@@ -220,10 +204,15 @@ void ui_draw_desktop(void) {
     g_sel_visible = 0;
 }
 
-// Initialize UI
-void ui_init(void) {
-    // Character initialization is done in vdp_init()
-    // Nothing else needed here currently
+// Clear selection (called when deselecting)
+void ui_clear_selection(void) {
+    if (g_sel_visible) {
+        ui_putchar(g_sel_row,     g_sel_col - 1, ' ');
+        ui_putchar(g_sel_row + 1, g_sel_col - 1, ' ');
+        ui_putchar(g_sel_row,     g_sel_col + 2, ' ');
+        ui_putchar(g_sel_row + 1, g_sel_col + 2, ' ');
+        g_sel_visible = 0;
+    }
 }
 
 // Highlight/select a device icon with side brackets (4 wide x 2 tall)
@@ -238,11 +227,7 @@ void ui_select_device(unsigned int idx, unsigned int selected) {
 
     // Clear previous selection if visible
     if (g_sel_visible && !selected) {
-        ui_putchar(g_sel_row,     g_sel_col - 1, ' ');  // Left-top
-        ui_putchar(g_sel_row + 1, g_sel_col - 1, ' ');  // Left-bottom
-        ui_putchar(g_sel_row,     g_sel_col + 2, ' ');  // Right-top
-        ui_putchar(g_sel_row + 1, g_sel_col + 2, ' ');  // Right-bottom
-        g_sel_visible = 0;
+        ui_clear_selection();
     }
 
     if (selected) {
@@ -257,17 +242,6 @@ void ui_select_device(unsigned int idx, unsigned int selected) {
         g_sel_visible = 1;
         g_sel_row = row;
         g_sel_col = col;
-    }
-}
-
-// Clear selection (called when deselecting)
-void ui_clear_selection(void) {
-    if (g_sel_visible) {
-        ui_putchar(g_sel_row,     g_sel_col - 1, ' ');
-        ui_putchar(g_sel_row + 1, g_sel_col - 1, ' ');
-        ui_putchar(g_sel_row,     g_sel_col + 2, ' ');
-        ui_putchar(g_sel_row + 1, g_sel_col + 2, ' ');
-        g_sel_visible = 0;
     }
 }
 

@@ -1,6 +1,7 @@
 // input.c - TI-99/4A Desktop Environment Input Handling
 #include "vdp.h"
 #include "kscan.h"
+#include "files.h"
 #include "config.h"
 #include "types.h"
 
@@ -19,6 +20,7 @@ extern void ui_select_device(unsigned int idx, unsigned int selected);
 extern void ui_clear_selection(void);
 extern void ui_status(const char *msg);
 extern void ui_draw_desktop(void);
+extern void ui_draw_window(unsigned int x, unsigned int y, unsigned int w, unsigned int h, const char *title);
 
 // Forward declarations from window.c
 extern int window_open(Device *dev);
@@ -44,12 +46,6 @@ extern unsigned int device_read_dir(Device *dev, FileEntry *files, unsigned int 
 extern void cart_launch_rom(unsigned int entry_addr);
 extern void cart_launch_grom(unsigned int entry_addr, unsigned int port);
 extern void cart_setup_ea_environment();
-
-// Forward declaration for EA5 loader (scratchloaderDesktop.asm)
-extern void ea5ld(const char *filename);
-
-// Forward declaration for XB loader (xbloaderDesktop.asm)
-extern void xbld(const char *pFn, unsigned int nStart);
 
 // Forward declaration for text file viewer
 extern void viewer_view_file(const char *path, unsigned int is_variable, unsigned int rec_len);
@@ -279,21 +275,43 @@ static void input_open(void) {
                     return;
                 }
 
-                // set up a basic environment first
-                cart_setup_ea_environment();
-                
                 // TODO: we should do a little heuristics here before blindly loading
                 // - determine if EA5 or program
                 // - if XB, verify an XB cart is present
+             
+/*
+ROS Heuristics
+
+- get the start of the file (ROS uses direct sector access, we need to use SBRLNK)
+- First check it starts with 0000 or FFFF, it's EA#5
+- Verify EA#5 address is in range, and address+length is in range (though we only check first file)
+
+- XB check if IV254 - XB type
+- in the first sector, bytes 1 and 2 should be 0xAB, 0xCD, and bytes 16-255 should all be zero
+(or)
+- XB check if PROGRAM
+- ABS(word 0/1) == word 2/3 XOR word 3/4
+
+- set GRM address to >6370 - read first two bytes - must be >0600
+- I think I'd rather check the cartridge name for first "RXB" for the Rich loader, then "EXTENDED BASIC" then "XB" for regular
+- clean and rebuild scratchpad and XB command area
+- load Interrupt routine to >A100
+- interrupt routine waits for VDP >0829 to contain 'D', indicating the load of "DSK1.LOAD" at >820 (length byte) is complete
+- it then writes the new length+filename, then changes the GPL address to >6495 to process starting after the name copy
+- looks like it should work for RXB, at least for 2025
+*/                
+                // set up a basic environment first
+                cart_setup_ea_environment();
+                
                 // For now, force the base GROM too
                 *(unsigned char*)0x83fb=0;
                 if (file->type == FILE_TYPE_INTVAR) {
                     // TODO: need to get the address of XB from the cartridge header
-                    xbld(fullpath, 0x6372);
+                    dsr_xbld(fullpath, 0x6372);
                 } else {
                     // TODO: XB comes in program form too...
                     // This does not return on success
-                    ea5ld(fullpath);
+                    dsr_ea5ld(fullpath);
                 }
                 
                 // If we get here, load failed - but VDP is trashed, so we need to restart
@@ -385,37 +403,6 @@ static const char *color_names[] = {
 #define MENU_W      22
 #define MENU_H      12
 
-// Draw a simple menu window frame
-static void menu_draw_frame(const char *title) {
-    unsigned int i, j;
-
-    // Top border
-    vdpscreenchar(VDP_SCREEN_POS(MENU_Y, MENU_X), CHAR_WIN_TL);
-    hchar(MENU_Y, MENU_X + 1, CHAR_WIN_H, MENU_W - 2);
-    vdpscreenchar(VDP_SCREEN_POS(MENU_Y, MENU_X + MENU_W - 1), CHAR_WIN_TR);
-
-    // Title
-    {
-        unsigned int addr = gImage + VDP_SCREEN_POS(MENU_Y, MENU_X + 2);
-        VDP_SET_ADDRESS_WRITE(addr);
-        for (j = 0; title[j] && j < MENU_W - 4; j++) {
-            VDPWD(title[j]);
-        }
-    }
-
-    // Side borders and clear interior
-    for (i = 1; i < MENU_H - 1; i++) {
-        vdpscreenchar(VDP_SCREEN_POS(MENU_Y + i, MENU_X), CHAR_WIN_V);
-        hchar(MENU_Y + i, MENU_X + 1, ' ', MENU_W - 2);
-        vdpscreenchar(VDP_SCREEN_POS(MENU_Y + i, MENU_X + MENU_W - 1), CHAR_WIN_V);
-    }
-
-    // Bottom border
-    vdpscreenchar(VDP_SCREEN_POS(MENU_Y + MENU_H - 1, MENU_X), CHAR_WIN_BL);
-    hchar(MENU_Y + MENU_H - 1, MENU_X + 1, CHAR_WIN_H, MENU_W - 2);
-    vdpscreenchar(VDP_SCREEN_POS(MENU_Y + MENU_H - 1, MENU_X + MENU_W - 1), CHAR_WIN_BR);
-}
-
 // Draw a color line in the menu (total 20 chars: 1+1+8+10)
 static void menu_draw_color_line(unsigned int row, unsigned int key, const char *label, unsigned int color) {
     unsigned int addr = gImage + VDP_SCREEN_POS(row, MENU_X + 1);
@@ -429,9 +416,7 @@ static void menu_draw_color_line(unsigned int row, unsigned int key, const char 
         VDPWD(label[i] ? label[i] : ' ');
     }
     // Color name (10 chars)
-    for (i = 0; i < 10; i++) {
-        VDPWD(color_names[color & 0x0F][i]);
-    }
+    raw_vdpmemcpy(color_names[color & 0x0F], 10);
 }
 
 // Redraw colors in VDP after a color change
@@ -455,7 +440,7 @@ static void menu_draw_title_line(void) {
     vdpmemcpy(addr, (const unsigned char *)"9:Title ", 8);
 
     // Show up to 12 chars of current title (pad with spaces)
-    VDP_SET_ADDRESS_WRITE(addr + 8);
+    // assumes address is still set from above
     for (i = 0; i < 12; i++) {
         if (g_title_string[i] == 0) ended = 1;
         VDPWD(ended ? ' ' : g_title_string[i]);
@@ -467,15 +452,11 @@ static void menu_draw_title_line(void) {
 static void menu_draw_clock_line(void) {
     static const char remove_msg[] = "0:Remove Clock";
     unsigned int addr = gImage + VDP_SCREEN_POS(MENU_Y + 10, MENU_X + 1);
-    unsigned int i;
 
-    VDP_SET_ADDRESS_WRITE(addr);
-    for (i = 0; i < 20; i++) {
-        if (g_clock_available && i < sizeof(remove_msg) - 1) {
-            VDPWD(remove_msg[i]);
-        } else {
-            VDPWD(' ');
-        }
+    if (g_clock_available) {
+        vdpmemcpy(addr, remove_msg, sizeof(remove_msg)-1);
+    } else {
+        vdpmemset(addr, ' ', sizeof(remove_msg)-1);
     }
 }
 
@@ -527,9 +508,6 @@ static void menu_title_entry(void) {
     unsigned int key, lastkey = 0;
     char buf[TITLE_TEXT_LEN + 1];
     unsigned int len;
-
-    // External generic window drawing from ui.c
-    extern void ui_draw_window(unsigned int x, unsigned int y, unsigned int w, unsigned int h, const char *title);
 
     // Copy current title into edit buffer
     for (len = 0; len < TITLE_TEXT_LEN && g_title_string[len]; len++) {
@@ -604,7 +582,7 @@ static void menu_color_config(void) {
     unsigned int key, lastkey = 0;
     extern void window_redraw_all(void);
 
-    menu_draw_frame("Colors");
+    ui_draw_window(MENU_X, MENU_Y, MENU_W, MENU_H, "Colors");
     menu_draw_all_colors();
 
     ui_status("1-8:Color 9:Title F9:Done");
@@ -689,7 +667,7 @@ static void menu_color_config(void) {
             // (also shows the new title bar text), then the menu again
             ui_draw_desktop();
             window_redraw_all();
-            menu_draw_frame("Colors");
+            ui_draw_window(MENU_X, MENU_Y, MENU_W, MENU_H, "Colors");
             menu_draw_all_colors();
             ui_status("1-8:Color 9:Title F9:Done");
             if (g_app.device_count > 0) {
@@ -739,39 +717,6 @@ static const unsigned int icon_chars_br[] = {
 #define ICON_MENU_W     18
 #define ICON_MENU_H     6
 
-// Draw icon menu frame with icons
-static void menu_draw_icon_frame(const char *title) {
-    unsigned int i, j;
-    unsigned int x = ICON_MENU_X;
-    unsigned int y = ICON_MENU_Y;
-    unsigned int w = ICON_MENU_W;
-    unsigned int h = ICON_MENU_H;
-
-    // Top border with title
-    vdpscreenchar(VDP_SCREEN_POS(y, x), CHAR_WIN_TL);
-    hchar(y, x + 1, CHAR_WIN_H, w - 2);
-    vdpscreenchar(VDP_SCREEN_POS(y, x + w - 1), CHAR_WIN_TR);
-    {
-        unsigned int addr = gImage + VDP_SCREEN_POS(y, x + 2);
-        VDP_SET_ADDRESS_WRITE(addr);
-        for (j = 0; title[j] && j < w - 4; j++) {
-            VDPWD(title[j]);
-        }
-    }
-
-    // Side borders and clear interior
-    for (i = 1; i < h - 1; i++) {
-        vdpscreenchar(VDP_SCREEN_POS(y + i, x), CHAR_WIN_V);
-        hchar(y + i, x + 1, ' ', w - 2);
-        vdpscreenchar(VDP_SCREEN_POS(y + i, x + w - 1), CHAR_WIN_V);
-    }
-
-    // Bottom border
-    vdpscreenchar(VDP_SCREEN_POS(y + h - 1, x), CHAR_WIN_BL);
-    hchar(y + h - 1, x + 1, CHAR_WIN_H, w - 2);
-    vdpscreenchar(VDP_SCREEN_POS(y + h - 1, x + w - 1), CHAR_WIN_BR);
-}
-
 // Draw the 6 icons in the icon menu (2 rows of 3)
 static void menu_draw_icons(void) {
     unsigned int i, row, col;
@@ -810,7 +755,7 @@ static void menu_change_icon(unsigned int dev_idx) {
     extern void window_redraw_all(void);
     Device *dev = &g_app.devices[dev_idx];
 
-    menu_draw_icon_frame("Select Icon");
+    ui_draw_window(ICON_MENU_X, ICON_MENU_Y, ICON_MENU_W, ICON_MENU_H, "Select Icon");
     menu_draw_icons();
 
     ui_status("1-6:Select  Fctn-9:Cancel");
@@ -866,23 +811,9 @@ static unsigned int menu_confirm(const char *msg) {
     x = (32 - w) / 2;
 
     // Draw small confirm box
-    vdpscreenchar(VDP_SCREEN_POS(10, x), CHAR_WIN_TL);
-    hchar(10, x + 1, CHAR_WIN_H, w - 2);
-    vdpscreenchar(VDP_SCREEN_POS(10, x + w - 1), CHAR_WIN_TR);
-
-    vdpscreenchar(VDP_SCREEN_POS(11, x), CHAR_WIN_V);
-    hchar(11, x + 1, ' ', w - 2);
+    ui_draw_window(x, 10, w, 4, "");
     vdpmemcpy(gImage + VDP_SCREEN_POS(11, x + 2), (const unsigned char *)msg, len);
-    vdpscreenchar(VDP_SCREEN_POS(11, x + w - 1), CHAR_WIN_V);
-
-    vdpscreenchar(VDP_SCREEN_POS(12, x), CHAR_WIN_V);
-    hchar(12, x + 1, ' ', w - 2);
     vdpmemcpy(gImage + VDP_SCREEN_POS(12, x + 2), (const unsigned char *)"Y:Yes  N:No", 11);
-    vdpscreenchar(VDP_SCREEN_POS(12, x + w - 1), CHAR_WIN_V);
-
-    vdpscreenchar(VDP_SCREEN_POS(13, x), CHAR_WIN_BL);
-    hchar(13, x + 1, CHAR_WIN_H, w - 2);
-    vdpscreenchar(VDP_SCREEN_POS(13, x + w - 1), CHAR_WIN_BR);
 
     // Wait for Y or N
     for (;;) {
@@ -929,36 +860,6 @@ static void menu_remove_device(unsigned int dev_idx) {
 #define DEV_MENU_W      12
 #define DEV_MENU_H      6
 
-// Draw device popup frame
-static void menu_draw_dev_frame(const char *title) {
-    unsigned int i, j;
-    unsigned int x = DEV_MENU_X;
-    unsigned int y = DEV_MENU_Y;
-    unsigned int w = DEV_MENU_W;
-    unsigned int h = DEV_MENU_H;
-
-    vdpscreenchar(VDP_SCREEN_POS(y, x), CHAR_WIN_TL);
-    hchar(y, x + 1, CHAR_WIN_H, w - 2);
-    vdpscreenchar(VDP_SCREEN_POS(y, x + w - 1), CHAR_WIN_TR);
-    {
-        unsigned int addr = gImage + VDP_SCREEN_POS(y, x + 2);
-        VDP_SET_ADDRESS_WRITE(addr);
-        for (j = 0; title[j] && j < w - 4; j++) {
-            VDPWD(title[j]);
-        }
-    }
-
-    for (i = 1; i < h - 1; i++) {
-        vdpscreenchar(VDP_SCREEN_POS(y + i, x), CHAR_WIN_V);
-        hchar(y + i, x + 1, ' ', w - 2);
-        vdpscreenchar(VDP_SCREEN_POS(y + i, x + w - 1), CHAR_WIN_V);
-    }
-
-    vdpscreenchar(VDP_SCREEN_POS(y + h - 1, x), CHAR_WIN_BL);
-    hchar(y + h - 1, x + 1, CHAR_WIN_H, w - 2);
-    vdpscreenchar(VDP_SCREEN_POS(y + h - 1, x + w - 1), CHAR_WIN_BR);
-}
-
 // Draw one text line inside the device popup
 static void menu_dev_line(unsigned int row, const char *text) {
     unsigned int addr = gImage + VDP_SCREEN_POS(row, DEV_MENU_X + 1);
@@ -972,7 +873,7 @@ static void menu_dev_line(unsigned int row, const char *text) {
 
 // Draw the complete device popup (frame, options, status)
 static void menu_draw_dev_popup(unsigned int is_cart) {
-    menu_draw_dev_frame("Device");
+    ui_draw_window(DEV_MENU_X, DEV_MENU_Y, DEV_MENU_W, DEV_MENU_H, "Device");
 
     menu_dev_line(DEV_MENU_Y + 1, "I:Chg Icon");
     if (!is_cart) {

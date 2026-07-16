@@ -5,11 +5,13 @@
 #include "vdp.h"
 #include "kscan.h"
 #include "files.h"
+#include "string.h"
 
 // Forward declarations
 extern void ui_status(const char *msg);
 extern void ui_draw_desktop(void);
-void clock_update_display(void);
+extern void clock_update_display(void);
+extern void ui_draw_window(unsigned int x, unsigned int y, unsigned int w, unsigned int h, const char *title);
 
 // Scan result entry - device name found during CRU scan
 typedef struct {
@@ -51,6 +53,17 @@ static const unsigned int cru_scan_list[] = {
 #define CLOCK_BUF_ADDR  0x2820
 #define DIR_PAB_ADDR    0x2880
 #define DIR_BUF_ADDR    0x28C0
+
+// shared function to init a PAB
+// this loads defaults, you may need other values initialized
+// don't call this if you are just updating an existing PAB, old values are blown away!
+void preparePAB(struct PAB *pab, unsigned char opcode, unsigned int address, unsigned int namelen, const char *name) {
+    memset(pab, 0, sizeof(struct PAB));
+    pab->OpCode = opcode;
+    pab->VDPBuffer = address;
+    pab->NameLength = namelen;
+    pab->pName = (unsigned char*)name;
+}
 
 // Convert TI radix-100 floating point to integer
 // TI format: byte 0 = exponent (biased by 64, radix 100)
@@ -438,15 +451,17 @@ static unsigned int disk_read_dir_path(Device *dev, const char *path, char *volu
     i = pos;  // Set i for pab.NameLength
 
     // Try opening as Long Filename mode first (Internal Fixed 254)
-    pab.OpCode = DSR_OPEN;
+    preparePAB(&pab, DSR_OPEN, DIR_BUF_ADDR, i, dir_name);
     pab.Status = DSR_TYPE_INTERNAL | DSR_TYPE_INPUT;
-    pab.VDPBuffer = DIR_BUF_ADDR;
     pab.RecordLength = 254;  // LFN mode - but we still need to read back the true value
-    pab.CharCount = 0;
-    pab.RecordNumber = 0;
-    pab.ScreenOffset = 0;
-    pab.NameLength = i;
-    pab.pName = (unsigned char *)dir_name;
+
+    //pab.OpCode = DSR_OPEN;
+    //pab.VDPBuffer = DIR_BUF_ADDR;
+    //pab.CharCount = 0;
+    //pab.RecordNumber = 0;
+    //pab.ScreenOffset = 0;
+    //pab.NameLength = i;
+    //pab.pName = (unsigned char *)dir_name;
 
     result = dsrlnk(&pab, DIR_PAB_ADDR);
     if (result != 0) {
@@ -714,8 +729,7 @@ unsigned int device_get_scan_count(void) {
 
 // Check if name matches "CLOCK"
 static unsigned int is_clock_device(const char *name) {
-    return (name[0] == 'C' && name[1] == 'L' && name[2] == 'O' &&
-            name[3] == 'C' && name[4] == 'K' && (name[5] == 0 || name[5] == ' '));
+    return ((0 == memcmp(name, "CLOCK", 5)) && (name[5] == 0 || name[5] == ' '));
 }
 
 // Add a scanned device to the desktop
@@ -745,8 +759,10 @@ unsigned int device_add_from_scan(unsigned int scan_idx) {
     }
 
     // Detect device type from name prefix
-    if (scan->name[0] == 'W' && scan->name[1] == 'D' && scan->name[2] == 'S') {
-        // WDSx = hard disk
+    if ((0 == memcmp(scan->name, "WDS", 3)) ||
+        (0 == memcmp(scan->name, "SCS", 3)) ||
+        (0 == memcmp(scan->name, "IDE", 3))) {
+        // WDSx, SCS or IDE = hard disk
         dev->icon = CHAR_HD_TL;
         dev->flags = DEVICE_HD;
     } else {
@@ -805,13 +821,9 @@ static void device_draw_sel_content(unsigned int scroll, unsigned int cursor) {
 
             // Selection checkbox
             if (device_is_selected(idx)) {
-                vdpscreenchar(VDP_SCREEN_POS(row, SEL_WIN_X + 2), '[');
-                vdpscreenchar(VDP_SCREEN_POS(row, SEL_WIN_X + 3), '*');
-                vdpscreenchar(VDP_SCREEN_POS(row, SEL_WIN_X + 4), ']');
+                vdpmemcpy(VDP_SCREEN_POS(row, SEL_WIN_X + 2), "[*]", 3);
             } else {
-                vdpscreenchar(VDP_SCREEN_POS(row, SEL_WIN_X + 2), '[');
-                vdpscreenchar(VDP_SCREEN_POS(row, SEL_WIN_X + 3), ' ');
-                vdpscreenchar(VDP_SCREEN_POS(row, SEL_WIN_X + 4), ']');
+                vdpmemcpy(VDP_SCREEN_POS(row, SEL_WIN_X + 2), "[ ]", 3);
             }
 
             // Device name
@@ -825,32 +837,6 @@ static void device_draw_sel_content(unsigned int scroll, unsigned int cursor) {
             }
         }
     }
-}
-
-// Draw the selection window frame
-static void device_draw_sel_window(void) {
-    unsigned int i;
-
-    // Top border
-    vdpscreenchar(VDP_SCREEN_POS(SEL_WIN_Y, SEL_WIN_X), CHAR_WIN_TL);
-    hchar(SEL_WIN_Y, SEL_WIN_X + 1, CHAR_WIN_H, SEL_WIN_W - 2);
-    vdpscreenchar(VDP_SCREEN_POS(SEL_WIN_Y, SEL_WIN_X + SEL_WIN_W - 1), CHAR_WIN_TR);
-
-    // Title
-    vdpmemcpy(gImage + VDP_SCREEN_POS(SEL_WIN_Y, SEL_WIN_X + 2),
-              (const unsigned char *)"Select Devices", 14);
-
-    // Side borders and clear interior
-    for (i = 1; i < SEL_WIN_H - 1; i++) {
-        vdpscreenchar(VDP_SCREEN_POS(SEL_WIN_Y + i, SEL_WIN_X), CHAR_WIN_V);
-        hchar(SEL_WIN_Y + i, SEL_WIN_X + 1, ' ', SEL_WIN_W - 2);
-        vdpscreenchar(VDP_SCREEN_POS(SEL_WIN_Y + i, SEL_WIN_X + SEL_WIN_W - 1), CHAR_WIN_V);
-    }
-
-    // Bottom border
-    vdpscreenchar(VDP_SCREEN_POS(SEL_WIN_Y + SEL_WIN_H - 1, SEL_WIN_X), CHAR_WIN_BL);
-    hchar(SEL_WIN_Y + SEL_WIN_H - 1, SEL_WIN_X + 1, CHAR_WIN_H, SEL_WIN_W - 2);
-    vdpscreenchar(VDP_SCREEN_POS(SEL_WIN_Y + SEL_WIN_H - 1, SEL_WIN_X + SEL_WIN_W - 1), CHAR_WIN_BR);
 }
 
 // Run the device selection dialog
@@ -868,7 +854,7 @@ static unsigned int device_run_selection(void) {
     }
 
     // Draw window
-    device_draw_sel_window();
+    ui_draw_window(SEL_WIN_X, SEL_WIN_Y, SEL_WIN_W, SEL_WIN_H, "Select Devices");
     device_draw_sel_content(scroll, cursor);
     ui_status("Space:Sel  Enter:Add  Fctn-9:Cancel");
 
@@ -1001,8 +987,7 @@ void device_scan(void) {
     // Show result
     if (added > 0) {
         char msg[20];
-        msg[0] = 'A'; msg[1] = 'd'; msg[2] = 'd'; msg[3] = 'e';
-        msg[4] = 'd'; msg[5] = ' ';
+        memcpy(msg, "Added ", 6);
         if (added >= 10) {
             msg[6] = '0' + (added / 10);
             msg[7] = '0' + (added % 10);
@@ -1045,7 +1030,7 @@ void cart_setup_ea_environment(void) {
     // Set pattern table pointer for character loader
     gPattern = 0x0800;
 
-    // Load standard lowercase character set
+    // Load standard lowercase character set (a little less standard but nicer)
     charsetlc();
 
     VDP_SET_REGISTER(VDP_REG_MODE1, 0xE0);   // 16K, display on, int enabled
@@ -1122,15 +1107,17 @@ unsigned int clock_read_time(char *time_buf) {
     if (!g_clock_available) return 0;
 
     // Set up PAB for OPEN
-    pab.OpCode = DSR_OPEN;
+    preparePAB(&pab, DSR_OPEN, CLOCK_BUF_ADDR, 5, clock_name);
     pab.Status = DSR_TYPE_VARIABLE | DSR_TYPE_DISPLAY | DSR_TYPE_UPDATE;
-    pab.VDPBuffer = CLOCK_BUF_ADDR;
-    pab.RecordLength = 0;  // Auto-detect
-    pab.CharCount = 0;
-    pab.RecordNumber = 0;
-    pab.ScreenOffset = 0;
-    pab.NameLength = 5;
-    pab.pName = (unsigned char *)clock_name;
+
+    //pab.OpCode = DSR_OPEN;
+    //pab.VDPBuffer = CLOCK_BUF_ADDR;
+    //pab.RecordLength = 0;  // Auto-detect
+    //pab.CharCount = 0;
+    //pab.RecordNumber = 0;
+    //pab.ScreenOffset = 0;
+    //pab.NameLength = 5;
+    //pab.pName = (unsigned char *)clock_name;
 
     // Open the device
     result = dsrlnk(&pab, CLOCK_PAB_ADDR);

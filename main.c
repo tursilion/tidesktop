@@ -1,11 +1,12 @@
 // main.c - TI-99/4A Desktop Environment Entry Point
 #include "vdp.h"
 #include "kscan.h"
+#include "files.h"
 #include "config.h"
 #include "types.h"
+#include "string.h"
 
 // Forward declarations from other modules
-extern void ui_init(void);
 extern void ui_draw_desktop(void);
 extern void input_process(void);
 extern void chars_init(void);
@@ -79,11 +80,7 @@ static void app_init(void) {
     // Windows are initialized by window_init()
 
     // Add cartridge as first device (always present)
-    g_app.devices[0].name[0] = 'C';
-    g_app.devices[0].name[1] = 'A';
-    g_app.devices[0].name[2] = 'R';
-    g_app.devices[0].name[3] = 'T';
-    g_app.devices[0].name[4] = 0;
+    memcpy(&g_app.devices[0].name, "CART", 5);
     g_app.devices[0].icon = CHAR_CART_TL;      // Icon determined by flags in UI
     g_app.devices[0].flags = DEVICE_CART;
     g_app.device_count = 1;
@@ -119,9 +116,6 @@ int main(void) {
             g_app.menu_active = 0;
             // Window state is preserved - scroll positions, cursor, files, etc.
         }
-
-        // Initialize UI
-        ui_init();
 
         // Draw initial desktop
         ui_draw_desktop();

@@ -7,6 +7,7 @@
 
 // External functions
 extern void ui_status(const char *msg);
+extern void preparePAB(struct PAB *pab, unsigned char opcode, unsigned int address, unsigned int namelen, char *name);
 
 // Viewer PAB addresses (same as directory PAB)
 #define VIEW_PAB_ADDR   0x2800
@@ -41,44 +42,7 @@ extern void ui_status(const char *msg);
 } g_viewer;
 
 static void viewer_close_file(void);
-
-// Draw the viewer frame
-static void viewer_draw_frame(const char *title) {
-    unsigned int i;
-    unsigned int addr;
-
-    // Top border
-    vdpscreenchar(VDP_SCREEN_POS(VIEW_Y, VIEW_X), CHAR_WIN_TL);
-    hchar(VIEW_Y, VIEW_X + 1, CHAR_WIN_H, VIEW_W - 2);
-    vdpscreenchar(VDP_SCREEN_POS(VIEW_Y, VIEW_X + VIEW_W - 1), CHAR_WIN_TR);
-
-    // Title (truncate to fit)
-    if (title) {
-        unsigned int title_len = 0;
-        while (title[title_len] && title_len < VIEW_W - 4) title_len++;
-        addr = gImage + VDP_SCREEN_POS(VIEW_Y, VIEW_X + 2);
-        VDP_SET_ADDRESS_WRITE(addr);
-        for (i = 0; i < title_len; i++) {
-            VDPWD(title[i]);
-        }
-    }
-
-    // Side borders
-    for (i = 1; i < VIEW_H - 1; i++) {
-        vdpscreenchar(VDP_SCREEN_POS(VIEW_Y + i, VIEW_X), CHAR_WIN_V);
-        vdpscreenchar(VDP_SCREEN_POS(VIEW_Y + i, VIEW_X + VIEW_W - 1), CHAR_WIN_V);
-    }
-
-    // Bottom border
-    vdpscreenchar(VDP_SCREEN_POS(VIEW_Y + VIEW_H - 1, VIEW_X), CHAR_WIN_BL);
-    hchar(VIEW_Y + VIEW_H - 1, VIEW_X + 1, CHAR_WIN_H, VIEW_W - 2);
-    vdpscreenchar(VDP_SCREEN_POS(VIEW_Y + VIEW_H - 1, VIEW_X + VIEW_W - 1), CHAR_WIN_BR);
-
-    // Clear interior
-    for (i = 1; i < VIEW_H - 1; i++) {
-        hchar(VIEW_Y + i, VIEW_X + 1, ' ', VIEW_W - 2);
-    }
-}
+extern void ui_draw_window(unsigned int x, unsigned int y, unsigned int w, unsigned int h, const char *title);
 
 // Draw the current page of records
 static void viewer_draw_content(void) {
@@ -124,18 +88,21 @@ static void viewer_draw_content(void) {
 
 // load the default data into a PAB
 static void prepare_pab(struct PAB *ppab) {
+    // the global prepare to save a few bytes of code space
+    preparePAB(ppab, 0, VIEW_BUF_ADDR, 0, g_viewer.filename);
     if (g_viewer.is_variable) {
         ppab->Status = DSR_TYPE_VARIABLE | DSR_TYPE_DISPLAY | DSR_TYPE_INPUT;
     } else {
         ppab->Status = DSR_TYPE_DISPLAY | DSR_TYPE_INPUT;
     }
-    ppab->VDPBuffer = VIEW_BUF_ADDR;
     ppab->RecordLength = g_viewer.rec_len;
-    ppab->CharCount = 0;
-    ppab->RecordNumber = 0;
-    ppab->ScreenOffset = 0;
-    ppab->NameLength = 0;
-    ppab->pName = (unsigned char *)g_viewer.filename;
+
+    //ppab->VDPBuffer = VIEW_BUF_ADDR;  // already done
+    //ppab->CharCount = 0;
+    //ppab->RecordNumber = 0;
+    //ppab->ScreenOffset = 0;
+    //ppab->NameLength = 0;
+    //ppab->pName = (unsigned char *)g_viewer.filename;
 }
 
 // opens the file after the global structure has been setup, so we can re-open
@@ -392,7 +359,7 @@ void viewer_view_file(const char *path, unsigned int is_variable, unsigned int r
     viewer_get_title(path, title, 28);
 
     // Draw viewer frame
-    viewer_draw_frame(title);
+    ui_draw_window(VIEW_X, VIEW_Y, VIEW_W, VIEW_H, title);
 
     // Read and display first page
     viewer_read_page(0);
@@ -517,15 +484,19 @@ void viewer_show_bitmap(const char *path) {
     vdpmemset(gImage, 0, 768);
 
     // Set up PAB for LOAD - pattern data
-    pab.OpCode = DSR_LOAD;
-    pab.Status = 0;
-    pab.VDPBuffer = 0x0000;         // Pattern table at >0000
-    pab.RecordLength = 0;
-    pab.CharCount = 0;
+    // the global prepare, not the local one...
+    // pattern table at >0000
+    preparePAB(&pab, DSR_LOAD, 0x0000, 0, filename);
     pab.RecordNumber = 6144;        // Max bytes to load
-    pab.ScreenOffset = 0;
-    pab.NameLength = 0;
-    pab.pName = (unsigned char *)filename;
+
+    //pab.OpCode = DSR_LOAD;
+    //pab.Status = 0;
+    //pab.VDPBuffer = 0x0000;         // Pattern table at >0000
+    //pab.RecordLength = 0;
+    //pab.CharCount = 0;
+    //pab.ScreenOffset = 0;
+    //pab.NameLength = 0;
+    //pab.pName = (unsigned char *)filename;
 
     // Load pattern data
     result = dsrlnk(&pab, BMP_PAB_ADDR);
@@ -540,16 +511,18 @@ void viewer_show_bitmap(const char *path) {
         filename[len-1] = 'C';
     }
 
-    // Set up PAB for LOAD - color data
-    pab.OpCode = DSR_LOAD;
-    pab.Status = 0;
-    pab.VDPBuffer = 0x2000;         // Color table at >2000
-    pab.RecordLength = 0;
-    pab.CharCount = 0;
+    // Set up PAB for LOAD - color data at >2000
+    preparePAB(&pab, DSR_LOAD, 0x2000, 0, filename);
     pab.RecordNumber = 6144;        // Max bytes to load
-    pab.ScreenOffset = 0;
-    pab.NameLength = 0;
-    pab.pName = (unsigned char *)filename;
+
+    //pab.OpCode = DSR_LOAD;
+    //pab.Status = 0;
+    //pab.VDPBuffer = 0x2000;         // Color table at >2000
+    //pab.RecordLength = 0;
+    //pab.CharCount = 0;
+    //pab.ScreenOffset = 0;
+    //pab.NameLength = 0;
+    //pab.pName = (unsigned char *)filename;
 
     // Load color data
     result = dsrlnk(&pab, BMP_PAB_ADDR);

@@ -37,7 +37,7 @@ LDFLAGS=-M -Ttext=0xA000 -Tdata=0x2000
 .PHONY: all clean install test
 
 # Object files - crt0 must be first!
-OBJECTS = crt0.o main.o chars.o ui.o input.o device.o window.o viewer.o prefs.o scratchloaderDesktop.o xbloaderDesktop.o
+OBJECTS = crt0.o main.o chars.o ui.o input.o device.o window.o viewer.o prefs.o
 
 all: $(NAME)
 
@@ -50,7 +50,7 @@ clean:
 
 install: $(NAME)
 	$(CP) DESKTOP* $(CLASSIC99_DSK1)
-	$(CLASSIC99_PASTE) -reset QQ25DSK0.DESKTOP1\\n
+	$(CLASSIC99_PASTE) -reset QQ325DSK0.DESKTOP1\\n
 
 # Local crt0 for EA5 startup (copied from libti99)
 crt0.o: crt0.asm

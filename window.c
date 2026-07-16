@@ -2,18 +2,21 @@
 #include "vdp.h"
 #include "config.h"
 #include "types.h"
+#include "string.h"
 
 // External UI functions
 extern void ui_status(const char *msg);
 
 // Forward declarations
-static void window_draw_frame(Window *win, const char *title);
 static void window_draw_content(Window *win);
 void window_show(Window *win);
 
 // Forward declarations from device.c
 extern unsigned int device_read_dir(Device *dev, FileEntry *files, unsigned int max_files, unsigned int page);
 extern unsigned int device_read_dir_with_path(Device *dev, const char *path, char *volume_name, FileEntry *files, unsigned int max_files, unsigned int page);
+
+// from ui.c
+extern void ui_draw_window(unsigned int x, unsigned int y, unsigned int w, unsigned int h, const char *title);
 
 // Global default scroll position (remembered across windows, persisted in prefs)
 unsigned int g_default_scroll_x = FILE_COL_NAME;
@@ -39,16 +42,9 @@ void window_init(void) {
     g_app.focus = FOCUS_DESKTOP;
     g_default_scroll_x = FILE_COL_NAME;  // Start at filename column
 
+    memset(g_app.windows, 0, sizeof(g_app.windows));
     for (i = 0; i < MAX_WINDOWS; i++) {
-        g_app.windows[i].active = 0;
-        g_app.windows[i].device = 0;
-        g_app.windows[i].file_count = 0;
         g_app.windows[i].scroll_x = FILE_COL_NAME;
-        g_app.windows[i].scroll_y = 0;
-        g_app.windows[i].cursor_y = 0;
-        g_app.windows[i].page_start = 0;
-        g_app.windows[i].volume_name[0] = 0;
-        g_app.windows[i].path[0] = 0;
     }
 
     // Set window positions
@@ -63,51 +59,6 @@ void window_init(void) {
     g_app.windows[1].y = WIN2_Y;
     g_app.windows[1].w = WIN_WIDTH;
     g_app.windows[1].h = WIN_HEIGHT;
-}
-
-// Draw window border and title
-static void window_draw_frame(Window *win, const char *title) {
-    unsigned int x, y, w, h;
-    unsigned int i;
-    unsigned int addr;
-
-    x = win->x;
-    y = win->y;
-    w = win->w;
-    h = win->h;
-
-    // Top border with corners
-    vdpscreenchar(VDP_SCREEN_POS(y, x), CHAR_WIN_TL);
-    hchar(y, x + 1, CHAR_WIN_H, w - 2);
-    vdpscreenchar(VDP_SCREEN_POS(y, x + w - 1), CHAR_WIN_TR);
-
-    // Side borders
-    for (i = 1; i < h - 1; i++) {
-        vdpscreenchar(VDP_SCREEN_POS(y + i, x), CHAR_WIN_V);
-        vdpscreenchar(VDP_SCREEN_POS(y + i, x + w - 1), CHAR_WIN_V);
-    }
-
-    // Bottom border with corners
-    vdpscreenchar(VDP_SCREEN_POS(y + h - 1, x), CHAR_WIN_BL);
-    hchar(y + h - 1, x + 1, CHAR_WIN_H, w - 2);
-    vdpscreenchar(VDP_SCREEN_POS(y + h - 1, x + w - 1), CHAR_WIN_BR);
-
-    // Clear interior
-    for (i = 1; i < h - 1; i++) {
-        hchar(y + i, x + 1, ' ', w - 2);
-    }
-
-    // Draw title (truncate to fit)
-    if (title) {
-        unsigned int title_len = 0;
-        while (title[title_len] && title_len < w - 4) title_len++;
-
-        addr = gImage + VDP_SCREEN_POS(y, x + 2);
-        VDP_SET_ADDRESS_WRITE(addr);
-        for (i = 0; i < title_len; i++) {
-            VDPWD(title[i]);
-        }
-    }
 }
 
 // Format a 16-bit address as 4 hex digits
@@ -188,32 +139,16 @@ static void format_file_line(FileEntry *file, char *line) {
 
     if (file->type == FILE_TYPE_PROGRAM) {
         // Program files: "PROG "
-        line[5] = 'P';
-        line[6] = 'R';
-        line[7] = 'O';
-        line[8] = 'G';
-        line[9] = ' ';
+        memcpy(&line[5], "PROG ", 5);
     } else if (file->type == FILE_TYPE_GROM) {
         // GROM cartridge: "GROM "
-        line[5] = 'G';
-        line[6] = 'R';
-        line[7] = 'O';
-        line[8] = 'M';
-        line[9] = ' ';
+        memcpy(&line[5], "GROM ", 5);
     } else if (file->type == FILE_TYPE_ROM) {
         // ROM cartridge: "ROM  "
-        line[5] = 'R';
-        line[6] = 'O';
-        line[7] = 'M';
-        line[8] = ' ';
-        line[9] = ' ';
+        memcpy(&line[5], "ROM  ", 5);
     } else if (file->type == FILE_TYPE_DIR) {
         // Subdirectory: "DIR  "
-        line[5] = 'D';
-        line[6] = 'I';
-        line[7] = 'R';
-        line[8] = ' ';
-        line[9] = ' ';
+        memcpy(&line[5], "DIR  ", 5);
     } else {
         // Data files: 2-char prefix + 3-digit record length
         line[5] = prefix[0];
@@ -404,7 +339,7 @@ int window_open(Device *dev) {
     }
 
     // Draw window frame
-    window_draw_frame(win, title);
+    ui_draw_window(win->x, win->y, win->w, win->h, title);
 
     // Draw content (already loaded)
     window_draw_content(win);
@@ -581,7 +516,7 @@ void window_show(Window *win) {
     }
     title[i] = 0;
 
-    window_draw_frame(win, title);
+    ui_draw_window(win->x, win->y, win->w, win->h, title);
     window_draw_content(win);
 }
 
@@ -823,7 +758,7 @@ void window_redraw_all(void) {
             title[j] = 0;
         }
 
-        window_draw_frame(win, title);
+        ui_draw_window(win->x, win->y, win->w, win->h, title);
         window_draw_content(win);
     }
 }

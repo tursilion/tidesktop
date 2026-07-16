@@ -16,6 +16,9 @@ extern unsigned int g_color_title_bg; // Title bar accent color
 extern unsigned int g_color_title_fg; // Title bar text color
 extern unsigned int g_color_divider;  // Divider line color
 
+// extern functions
+extern void preparePAB(struct PAB *pab, unsigned char opcode, unsigned int address, unsigned int namelen, char *name);
+
 // Default window horizontal scroll position from window.c
 extern unsigned int g_default_scroll_x;
 
@@ -128,15 +131,17 @@ unsigned int prefs_save(void) {
     // Copy blob to VDP, then SAVE it as a binary image
     vdpmemcpy(PREFS_BUF_ADDR, prefs_buf, pos);
 
-    pab.OpCode = DSR_SAVE;
-    pab.Status = 0;
-    pab.VDPBuffer = PREFS_BUF_ADDR;
-    pab.RecordLength = 0;
-    pab.CharCount = 0;
+    preparePAB(&pab, DSR_SAVE, PREFS_BUF_ADDR, PREFS_NAME_LEN, prefs_name);
     pab.RecordNumber = pos;     // Byte count for SAVE
-    pab.ScreenOffset = 0;
-    pab.NameLength = PREFS_NAME_LEN;
-    pab.pName = (unsigned char *)prefs_name;
+
+    //pab.OpCode = DSR_SAVE;
+    //pab.Status = 0;
+    //pab.VDPBuffer = PREFS_BUF_ADDR;
+    //pab.RecordLength = 0;
+    //pab.CharCount = 0;
+    //pab.ScreenOffset = 0;
+    //pab.NameLength = PREFS_NAME_LEN;
+    //pab.pName = (unsigned char *)prefs_name;
 
     return dsrlnk(&pab, PREFS_PAB_ADDR);
 }
@@ -150,15 +155,17 @@ unsigned int prefs_load(void) {
     unsigned int count;
     unsigned int pos;
 
-    pab.OpCode = DSR_LOAD;
-    pab.Status = 0;
-    pab.VDPBuffer = PREFS_BUF_ADDR;
-    pab.RecordLength = 0;
-    pab.CharCount = 0;
+    preparePAB(&pab, DSR_LOAD, PREFS_BUF_ADDR, PREFS_NAME_LEN, prefs_name);
     pab.RecordNumber = PREFS_MAX_SIZE;  // Buffer size limit for LOAD
-    pab.ScreenOffset = 0;
-    pab.NameLength = PREFS_NAME_LEN;
-    pab.pName = (unsigned char *)prefs_name;
+
+    //pab.OpCode = DSR_LOAD;
+    //pab.Status = 0;
+    //pab.VDPBuffer = PREFS_BUF_ADDR;
+    //pab.RecordLength = 0;
+    //pab.CharCount = 0;
+    //pab.ScreenOffset = 0;
+    //pab.NameLength = PREFS_NAME_LEN;
+    //pab.pName = (unsigned char *)prefs_name;
 
     if (dsrlnk(&pab, PREFS_PAB_ADDR) != 0) {
         return 0;   // No prefs file (or read error) - keep defaults
