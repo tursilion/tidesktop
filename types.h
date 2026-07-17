@@ -72,15 +72,17 @@ extern unsigned int g_color_fg;       // Foreground (text) color
 extern unsigned int g_color_desktop;  // Desktop area background color
 extern unsigned int g_color_icon;     // Icon color
 extern unsigned int g_color_select;   // Selection highlight color
-extern unsigned int g_color_title;    // Title bar accent color (cyan)
+extern unsigned int g_color_title_bg; // Title bar accent color
+extern unsigned int g_color_title_fg; // Title bar text color
+extern unsigned int g_color_divider;  // Divider line color
 
 // Global title string buffer (user configurable via menu)
 extern char g_title_string[TITLE_TEXT_LEN + 1];
 
-// Convert ASCII to title bar mini-font character
-extern unsigned int char_to_title(unsigned int c);
-
 // Clock (RTC) support
 extern unsigned int g_clock_available;  // 1 if CLOCK device found
+
+// Restart attempt if EA5 launch fails (defined in main.c)
+extern unsigned int restart_app;
 
 #endif // TYPES_H

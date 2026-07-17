@@ -6,24 +6,14 @@
 #include "kscan.h"
 #include "files.h"
 #include "string.h"
-
-// Forward declarations
-extern void ui_status(const char *msg);
-extern void ui_draw_desktop(void);
-extern void clock_update_display(void);
-extern void ui_draw_window(unsigned int x, unsigned int y, unsigned int w, unsigned int h, const char *title);
-
-// Scan result entry - device name found during CRU scan
-typedef struct {
-    char name[8];           // Device name (up to 7 chars + null)
-} ScanEntry;
+#include "ui.h"
+#include "window.h"
+#include "prefs.h"
+#include "device.h"
 
 // Scan results buffer
 static ScanEntry g_scan_results[MAX_SCAN_DEVICES];
 static unsigned int g_scan_count;
-
-// External character set loader from libti99
-extern void charsetlc(void);
 
 // CRU base addresses to scan for disk controllers
 // Standard TI floppy: >1100
@@ -968,7 +958,6 @@ void device_scan(void) {
 
     // Persist if the device list changed (or the clock was just found)
     if (added > 0 || (g_clock_available && !clock_was_set)) {
-        extern unsigned int prefs_save(void);
         prefs_save();
     }
 
@@ -976,7 +965,6 @@ void device_scan(void) {
     ui_draw_desktop();
 
     // Redraw any active windows (selection dialog may have overlapped)
-    extern void window_redraw_all(void);
     window_redraw_all();
 
     // If clock was newly found, update display immediately

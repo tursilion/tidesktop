@@ -5,15 +5,12 @@
 #include "config.h"
 #include "types.h"
 #include "string.h"
-
-// Forward declarations from other modules
-extern void ui_draw_desktop(void);
-extern void input_process(void);
-extern void chars_init(void);
-extern void window_init(void);
-extern void clock_update_display(void);
-extern void input_restore_selection(void);
-extern unsigned int prefs_load(void);
+#include "ui.h"
+#include "input.h"
+#include "chars.h"
+#include "window.h"
+#include "device.h"
+#include "prefs.h"
 
 // Global application state
 AppState g_app;

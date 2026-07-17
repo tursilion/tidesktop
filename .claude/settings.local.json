@@ -6,7 +6,10 @@
       "Bash(make install:*)",
       "Bash(xxd /mnt/d/work/ti/desktop/DESKTOP_PREFS)",
       "Bash(awk '/^prefs_load:/,/^\\\\tb\\\\t\\\\*r11/' /mnt/d/work/ti/desktop/prefs.s)",
-      "Bash(xxd *)"
+      "Bash(xxd *)",
+      "Bash(sort -t: -k3)",
+      "Bash(sed -i '/^[[:space:]]*extern void window_redraw_all\\(void\\);$/d; /^extern void device_scan\\(void\\);$/d; /^[[:space:]]*extern void chars_init\\(void\\);$/d' input.c)",
+      "Bash(echo \"exit=$?\")"
     ]
   }
 }

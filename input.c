@@ -4,71 +4,16 @@
 #include "files.h"
 #include "config.h"
 #include "types.h"
-
-// Color globals from main.c
-extern unsigned int g_color_bg;       // Background color
-extern unsigned int g_color_fg;       // Foreground (text) color
-extern unsigned int g_color_desktop;  // Desktop area color
-extern unsigned int g_color_icon;     // Icon color
-extern unsigned int g_color_select;   // Selection highlight color
-extern unsigned int g_color_title_bg; // Title bar accent color
-extern unsigned int g_color_title_fg; // Title bar text color
-extern unsigned int g_color_divider;  // Divider line color
-
-// Forward declarations from ui.c
-extern void ui_select_device(unsigned int idx, unsigned int selected);
-extern void ui_clear_selection(void);
-extern void ui_status(const char *msg);
-extern void ui_draw_desktop(void);
-extern void ui_draw_window(unsigned int x, unsigned int y, unsigned int w, unsigned int h, const char *title);
-
-// Forward declarations from window.c
-extern int window_open(Device *dev);
-extern void window_close(unsigned int win_idx);
-extern void window_toggle_focus(void);
-extern Window *window_get_focused(void);
-extern void window_scroll_left(Window *win);
-extern void window_scroll_right(Window *win);
-extern void window_cursor_up(Window *win);
-extern void window_cursor_down(Window *win);
-extern void window_page_up(Window *win);
-extern void window_page_down(Window *win);
-extern void window_get_title(Window *win, char *buf);
-extern void window_load_dir(Window *win, unsigned int page);
-extern void window_draw_indicator(void);
-extern void window_show(Window *win);
-extern unsigned int window_enter_subdir(Window *win);
-extern unsigned int window_up_dir(Window *win);
-extern void window_show_path(Window *win);
-
-// Forward declarations from device.c
-extern unsigned int device_read_dir(Device *dev, FileEntry *files, unsigned int max_files, unsigned int page);
-extern void cart_launch_rom(unsigned int entry_addr);
-extern void cart_launch_grom(unsigned int entry_addr, unsigned int port);
-extern void cart_setup_ea_environment();
-
-// Forward declaration for text file viewer
-extern void viewer_view_file(const char *path, unsigned int is_variable, unsigned int rec_len);
-
-// Forward declarations for bitmap viewer
-extern unsigned int viewer_is_bitmap(const char *path);
-extern void viewer_show_bitmap(const char *path);
-
-// Forward declarations from prefs.c
-extern unsigned int prefs_save(void);
-extern void prefs_save_scroll(void);
-
-// Forward declaration from device.c
-extern void clock_remove(void);
+#include "ui.h"
+#include "window.h"
+#include "device.h"
+#include "viewer.h"
+#include "prefs.h"
+#include "chars.h"
+#include "input.h"
 
 // Forward declaration for local function
 static void input_update_focus_status(void);
-
-// restart attempt if EA5 fails from main.c
-extern unsigned int restart_app;
-
-// Restore selection display after restart (called from main.c)
-void input_restore_selection(void);  // forward declaration
 
 // Currently selected device on desktop (-1 = none selected)
 static int g_selected = -1;
@@ -85,7 +30,6 @@ static unsigned int g_repeat_count = 0;
 // Restore selection display after restart
 // Called from main.c when VDP has been restored
 void input_restore_selection(void) {
-    extern void window_redraw_all(void);
 
     // Redraw selection reticule if there was one
     if (g_has_selection && g_selected >= 0 && (unsigned int)g_selected < g_app.device_count) {
@@ -237,7 +181,6 @@ static void input_open(void) {
             if (file->type == FILE_TYPE_DIR) {
                 // Enter subdirectory
                 if (window_enter_subdir(win)) {
-                    extern void window_redraw_all(void);
                     window_redraw_all();
                     input_update_focus_status();  // Show new path
                 }
@@ -382,7 +325,6 @@ ROS Heuristics
 }
 
 // Forward declaration from device.c
-extern void device_scan(void);
 
 // Handle Scan - enumerate devices via CRU
 static void input_scan(void) {
@@ -426,7 +368,6 @@ static void menu_apply_colors(void) {
     VDP_SET_REGISTER(VDP_REG_COL, g_color_bg);
 
     // Reload character colors
-    extern void chars_init(void);
     chars_init();
 }
 
@@ -580,7 +521,6 @@ static void menu_title_entry(void) {
 // Color configuration menu
 static void menu_color_config(void) {
     unsigned int key, lastkey = 0;
-    extern void window_redraw_all(void);
 
     ui_draw_window(MENU_X, MENU_Y, MENU_W, MENU_H, "Colors");
     menu_draw_all_colors();
@@ -752,7 +692,6 @@ static void menu_draw_icons(void) {
 // Icon selection submenu
 static void menu_change_icon(unsigned int dev_idx) {
     unsigned int key, lastkey = 0;
-    extern void window_redraw_all(void);
     Device *dev = &g_app.devices[dev_idx];
 
     ui_draw_window(ICON_MENU_X, ICON_MENU_Y, ICON_MENU_W, ICON_MENU_H, "Select Icon");
@@ -828,7 +767,6 @@ static unsigned int menu_confirm(const char *msg) {
 // Remove a device from the list
 static void menu_remove_device(unsigned int dev_idx) {
     unsigned int i;
-    extern void window_redraw_all(void);
 
     // Shift all devices after this one down
     for (i = dev_idx; i < g_app.device_count - 1; i++) {
@@ -914,7 +852,6 @@ static unsigned int menu_move_dev(unsigned int idx, int dir) {
 static void menu_device_popup(unsigned int dev_idx) {
     unsigned int key, lastkey = 0;
     unsigned int moved = 0;
-    extern void window_redraw_all(void);
     // Cartridge is always device 0 and cannot be removed or moved
     unsigned int is_cart = (dev_idx == 0);
 
@@ -1006,7 +943,6 @@ static void input_menu(void) {
 // Handle Fctn-9 (back/close/deselect)
 static void input_back(void) {
     unsigned int win_idx;
-    extern void window_redraw_all(void);
 
     // If the focused window is in a subdirectory, go up one level
     // instead of closing the window
@@ -1198,7 +1134,6 @@ void input_process(void) {
                     window_load_dir(win, 0);
 
                     // Redraw window
-                    extern void window_redraw_all(void);
                     window_redraw_all();
 
                     // Update status to show new device name

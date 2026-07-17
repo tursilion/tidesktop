@@ -2,10 +2,8 @@
 #include "vdp.h"
 #include "config.h"
 #include "types.h"
-
-// External globals
-extern unsigned int g_color_bg;
-extern unsigned int g_color_fg;
+#include "chars.h"
+#include "ui.h"
 
 // Track current selection for clearing
 static int g_sel_visible = 0;

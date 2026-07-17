@@ -4,10 +4,10 @@
 #include "vdp.h"
 #include "kscan.h"
 #include "files.h"
-
-// External functions
-extern void ui_status(const char *msg);
-extern void preparePAB(struct PAB *pab, unsigned char opcode, unsigned int address, unsigned int namelen, char *name);
+#include "ui.h"
+#include "device.h"
+#include "window.h"
+#include "viewer.h"
 
 // Viewer PAB addresses (same as directory PAB)
 #define VIEW_PAB_ADDR   0x2800
@@ -42,7 +42,8 @@ extern void preparePAB(struct PAB *pab, unsigned char opcode, unsigned int addre
 } g_viewer;
 
 static void viewer_close_file(void);
-extern void ui_draw_window(unsigned int x, unsigned int y, unsigned int w, unsigned int h, const char *title);
+
+// TODO: we can do a hex viewer of files we can't otherwise load using the sector access view
 
 // Draw the current page of records
 static void viewer_draw_content(void) {
@@ -346,8 +347,6 @@ static void viewer_get_title(const char *path, char *title, unsigned int max_len
 void viewer_view_file(const char *path, unsigned int is_variable, unsigned int rec_len) {
     unsigned int key, lastkey;
     char title[32];
-    extern void ui_draw_desktop(void);
-    extern void window_redraw_all(void);
 
     // Open the file
     if (!viewer_open_file(path, is_variable, rec_len)) {
@@ -469,7 +468,6 @@ void viewer_show_bitmap(const char *path) {
     unsigned char result;
     char filename[PATH_MAX_LEN];
     unsigned int i, len;
-    extern unsigned int restart_app;
 
     // Copy filename
     for (len = 0; path[len] && len < PATH_MAX_LEN - 1; len++) {

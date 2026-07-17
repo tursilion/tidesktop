@@ -5,22 +5,9 @@
 #include "files.h"
 #include "config.h"
 #include "types.h"
-
-// Color globals from main.c
-extern unsigned int g_color_bg;       // Background color
-extern unsigned int g_color_fg;       // Foreground (text) color
-extern unsigned int g_color_desktop;  // Desktop area color
-extern unsigned int g_color_icon;     // Icon color
-extern unsigned int g_color_select;   // Selection highlight color
-extern unsigned int g_color_title_bg; // Title bar accent color
-extern unsigned int g_color_title_fg; // Title bar text color
-extern unsigned int g_color_divider;  // Divider line color
-
-// extern functions
-extern void preparePAB(struct PAB *pab, unsigned char opcode, unsigned int address, unsigned int namelen, char *name);
-
-// Default window horizontal scroll position from window.c
-extern unsigned int g_default_scroll_x;
+#include "device.h"
+#include "window.h"
+#include "prefs.h"
 
 // Hardcoded preferences file path (for now)
 static const char prefs_name[] = "DSK0.DESKTOP_PREFS";

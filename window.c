@@ -3,20 +3,12 @@
 #include "config.h"
 #include "types.h"
 #include "string.h"
+#include "ui.h"
+#include "device.h"
+#include "window.h"
 
-// External UI functions
-extern void ui_status(const char *msg);
-
-// Forward declarations
+// Forward declaration for local function
 static void window_draw_content(Window *win);
-void window_show(Window *win);
-
-// Forward declarations from device.c
-extern unsigned int device_read_dir(Device *dev, FileEntry *files, unsigned int max_files, unsigned int page);
-extern unsigned int device_read_dir_with_path(Device *dev, const char *path, char *volume_name, FileEntry *files, unsigned int max_files, unsigned int page);
-
-// from ui.c
-extern void ui_draw_window(unsigned int x, unsigned int y, unsigned int w, unsigned int h, const char *title);
 
 // Global default scroll position (remembered across windows, persisted in prefs)
 unsigned int g_default_scroll_x = FILE_COL_NAME;
@@ -306,7 +298,6 @@ int window_open(Device *dev) {
 
         // Redraw desktop to clear area, then redraw the other window
         {
-            extern void ui_draw_desktop(void);
             ui_draw_desktop();
             window_show(&g_app.windows[other_idx]);
         }
@@ -484,7 +475,6 @@ void window_hide(Window *win) {
     win->active = 0;
 
     // Redraw full desktop
-    extern void ui_draw_desktop(void);
     ui_draw_desktop();
 
     // Restore active flag (window is still logically open, just hidden)
