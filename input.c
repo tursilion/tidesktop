@@ -1,3 +1,14 @@
+// TODO: mouse input. There are several types of mouse input - joystick emulators, serial mice, TIPI mouse. 
+// We need to set aside a fixed block of memory and an interface, and so provide a way to load it. We can
+// store the filename of the mouse driver (for now) in the preferences block.
+// We don't currently have a way to get from point to object, so we need code that will interact with all that, too.
+//
+// Currently it's looking like we aren't going to get file operations in there... we could remove all the second window code.
+//
+// TODO: bug - graphical corruption. I changed an icon and looked at the main menu, and every 4th character for 32 or so
+// were partially corrupted. I noticed when I hit scan - not sure if it was corrupt before that, but '1' and 'A' were affected
+// yeah, looks like scan breaks it.
+
 // input.c - TI-99/4A Desktop Environment Input Handling
 #include "vdp.h"
 #include "kscan.h"

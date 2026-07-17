@@ -811,9 +811,9 @@ static void device_draw_sel_content(unsigned int scroll, unsigned int cursor) {
 
             // Selection checkbox
             if (device_is_selected(idx)) {
-                vdpmemcpy(VDP_SCREEN_POS(row, SEL_WIN_X + 2), "[*]", 3);
+                vdpmemcpy(gImage + VDP_SCREEN_POS(row, SEL_WIN_X + 2), "[*]", 3);
             } else {
-                vdpmemcpy(VDP_SCREEN_POS(row, SEL_WIN_X + 2), "[ ]", 3);
+                vdpmemcpy(gImage + VDP_SCREEN_POS(row, SEL_WIN_X + 2), "[ ]", 3);
             }
 
             // Device name
