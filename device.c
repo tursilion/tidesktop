@@ -107,7 +107,7 @@ static const unsigned int grom_scan_addrs[] = {
 #define CART_HEADER_FLAG    0xAA
 
 // Read a 16-bit big-endian value from GROM
-static unsigned int grom_read_word(unsigned int addr, unsigned int port) {
+unsigned int grom_read_word(unsigned int addr, unsigned int port) {
     unsigned int hi, lo;
     hi = GromReadData(addr, port);
     lo = GromReadData(addr + 1, port);

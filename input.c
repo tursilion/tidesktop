@@ -11,6 +11,11 @@
 #include "prefs.h"
 #include "chars.h"
 #include "input.h"
+#include "grom.h"
+#include "string.h"
+
+// shared with the viewer memory
+#define VIEW_REC_BASE   0x29c0      // Start of record storage in VDP
 
 // Forward declaration for local function
 static void input_update_focus_status(void);
@@ -167,6 +172,175 @@ static void input_nav_right(void) {
     }
 }
 
+// try to match 'str' somewhere in the filename at grmadr (starting at pointer to this entry)
+// return '1' if found, else 0
+static int grom_string_match(unsigned int grmadr, const char *str) {
+    int lenstr = strlen(str);
+    grmadr+=4;  // point to length byte
+    
+    // These only work on base 0
+    GROM_SET_ADDRESS(grmadr);
+    __asm__ volatile (
+        "nop\n\t"
+    );
+    unsigned int len = GROMRD;
+    unsigned int matched = 0;
+    while (len >= lenstr-matched) {
+        unsigned char x = GROMRD;
+        if (x == str[matched]) {
+            ++matched;
+            if (matched == lenstr) {
+                return 1;
+            }
+        } else {
+            matched = 0;
+        }
+        --len;
+    }
+    return 0;
+}
+
+void runXB(const char *fullpath) {
+    // For now, force the base GROM to base 0 - that's the only support we'll have
+    // that way we don't have to deal with where the ROMs are or how they're banked
+    *(unsigned char*)0x83fb=0;
+
+    // Find the XB entry point. We want to find either "XB" or "EXTENDED"
+    // if they aren't compatible enough, that's on you, but even RXB2025 seems to work!
+    // All known XBs have entry in the >6000 GROM, so that is all we'll search
+    // fetch the program list
+    unsigned int grmadr = grom_read_word(0x6006, 0);
+    // we need to search the chain of programs
+    while (grmadr) {
+        unsigned int thisentry = grmadr;
+        grmadr = grom_read_word(grmadr, 0);
+        if ((grom_string_match(thisentry, "XB")) || (grom_string_match(thisentry, "EXTENDED"))) {
+            // we found XB!
+            grmadr = grom_read_word(thisentry+2, 0);
+
+            // set up a basic environment first
+            cart_setup_ea_environment();
+
+            // and go launch XB
+            dsr_xbld(fullpath, grmadr);
+
+            // if we return, restart cause system is going to be messed up
+            restart_app = 1;
+        }
+    }
+
+    // if we get here, we didn't find XB
+    ui_status("XB not found");
+}
+
+// try to start XB from an IV254
+static int tryXB254(const char *fullpath) {
+    unsigned char buf[8];
+
+    unsigned char ret = readfilesect(fullpath, VIEW_REC_BASE, VIEW_REC_BASE+0x80, 0, 1, 0);
+    if (GET_ERROR(ret)) {
+        // couldn't read it, but didn't change VDP
+        return 0;
+    }
+
+    // XB check if IV254 - XB type
+    // - in the first sector, bytes 1 and 2 should be 0xAB, 0xCD, and bytes 16-255 should all be zero
+    // we'll just check a few of the zeros
+    vdpmemread(VIEW_REC_BASE+0x81, buf, 2);
+    if ((buf[0] != 0xab) || (buf[1] != 0xcd)) {
+        // probably not ours
+        return 0;
+    }
+    vdpmemread(VIEW_REC_BASE+0x80+16, buf, 8);
+    if (0 != memcmp(buf, "\0\0\0\0\0\0\0\0", 8)) {
+        // probably not
+        return 0;
+    }
+
+    // okay, we'll try it!
+    runXB(fullpath);
+
+    // we tried, but something failed
+    return 1;
+}
+    
+// try to start XB from a PROGRAM
+static int tryXBProg(const char *fullpath) {
+    unsigned char buf[6];
+
+    unsigned char ret = readfilesect(fullpath, VIEW_REC_BASE, VIEW_REC_BASE+0x80, 0, 1, 0);
+    if (GET_ERROR(ret)) {
+        // couldn't read it, but didn't change VDP
+        return 0;
+    }
+
+    // XB check if PROGRAM
+    // - ABS(word 0/1) == word 2/3 XOR word 3/4
+    vdpmemread(VIEW_REC_BASE+0x80, buf, 6);
+    unsigned int w1 = buf[0]*256+buf[1];
+    unsigned int w2 = buf[2]*256+buf[3];
+    unsigned int w3 = buf[4]*256+buf[5];
+    if (w1 > 0x8000) w1=(~w1)+1;    // ABS
+    w2 ^= w3;
+    if (w1 != w2) {
+        // probably not ours
+        return 0;
+    }
+
+    // okay, we'll try it!
+    runXB(fullpath);
+
+    // we tried, but something failed
+    return 1;
+}
+
+// try to start EA PROGRAM
+static int tryEA5(const char *fullpath) {
+    unsigned char buf[6];
+
+    // we've already got the sector in memory from the XB read, don't read it again
+    //unsigned char ret = readfilesect(fullpath, VIEW_REC_BASE, VIEW_REC_BASE+0x80, 0, 1, 0);
+    //if (GET_ERROR(ret)) {
+    //    // couldn't read it, but didn't change VDP
+    //    return 0;
+    //}
+
+    // EA check: First check it starts with 0000 or FFFF, it's EA#5
+    // - Verify EA#5 address is in range, and address+length is in range (though we only check first file)
+    vdpmemread(VIEW_REC_BASE+0x80, buf, 6);
+    unsigned int w1 = buf[0]*256+buf[1];
+    unsigned int w2 = buf[2]*256+buf[3];
+    unsigned int w3 = buf[4]*256+buf[5];
+
+    if ((w1 != 0x0000) && (w1 != 0xffff)) {
+        // probably not ours
+        return 0;
+    }
+    if ((w3 < 0x2000) || ((w3 > 0x3fff) && (w3 < 0xa000))) {
+        // probably not ours
+        return 0;
+    }
+    w3 += w2 - 6;   // doing -6 because many savers erroneously include the length of the header
+    if ((w3 < 0x2000) || ((w3 > 0x3fff) && (w3 < 0xa000))) {
+        // probably not ours
+        return 0;
+    }
+
+    // okay, we'll try it!
+
+    // set up a basic environment first
+    cart_setup_ea_environment();
+
+    // and go launch XB
+    dsr_ea5ld(fullpath);
+
+    // if we return, restart cause system is going to be messed up
+    restart_app = 1;
+
+    // we tried, but something failed
+    return 1;
+}
+
 // Handle Enter - open selected device
 static void input_open(void) {
     Window *win;
@@ -229,11 +403,7 @@ ROS Heuristics
 - First check it starts with 0000 or FFFF, it's EA#5
 - Verify EA#5 address is in range, and address+length is in range (though we only check first file)
 
-- XB check if IV254 - XB type
-- in the first sector, bytes 1 and 2 should be 0xAB, 0xCD, and bytes 16-255 should all be zero
 (or)
-- XB check if PROGRAM
-- ABS(word 0/1) == word 2/3 XOR word 3/4
 
 - set GRM address to >6370 - read first two bytes - must be >0600
 - I think I'd rather check the cartridge name for first "RXB" for the Rich loader, then "EXTENDED BASIC" then "XB" for regular
@@ -243,22 +413,17 @@ ROS Heuristics
 - it then writes the new length+filename, then changes the GPL address to >6495 to process starting after the name copy
 - looks like it should work for RXB, at least for 2025
 */                
-                // set up a basic environment first
-                cart_setup_ea_environment();
-                
-                // For now, force the base GROM too
-                *(unsigned char*)0x83fb=0;
                 if (file->type == FILE_TYPE_INTVAR) {
-                    // TODO: need to get the address of XB from the cartridge header
-                    dsr_xbld(fullpath, 0x6372);
+                    // if we somehow return, refresh the app below                    
+                    tryXB254(fullpath);
                 } else {
-                    // TODO: XB comes in program form too...
-                    // This does not return on success
-                    dsr_ea5ld(fullpath);
+                    // It must be a PROGRAM cause we checked above
+                    // if we somehow return, refresh the app below                    
+                    if (!tryXBProg(fullpath)) {
+                        // XBProg didn't want it, try EA5
+                        tryEA5(fullpath);
+                    }
                 }
-                
-                // If we get here, load failed - but VDP is trashed, so we need to restart
-                restart_app = 1;
                 return;
             } else if (file->type == FILE_TYPE_ROM) {
                 // Launch ROM program - branch to entry address
